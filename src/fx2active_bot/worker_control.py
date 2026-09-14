@@ -30,7 +30,7 @@ class WorkerControl:
             pip_size=self.pip_size,
         )
 
-    def can_open_position(self, current_open_positions: int) -> WorkerDecision:
+    def can_open_position(self, current_open_positions: int, *, side: str | None = None) -> WorkerDecision:
         settings = self.current_settings()
         if not settings.trading_enabled:
             return WorkerDecision(False, "Trading is disabled from the web panel")
@@ -38,4 +38,12 @@ class WorkerControl:
             return WorkerDecision(False, "The Fibonacci entry rule is disabled")
         if current_open_positions >= settings.max_open_positions:
             return WorkerDecision(False, "Maximum open positions reached")
+        if not settings.allow_buys and not settings.allow_sells:
+            return WorkerDecision(False, "Both BUY and SELL entries are disabled")
+        if side == "BUY" and not settings.allow_buys:
+            return WorkerDecision(False, "BUY entries are disabled")
+        if side == "SELL" and not settings.allow_sells:
+            return WorkerDecision(False, "SELL entries are disabled")
+        if side not in {None, "BUY", "SELL"}:
+            return WorkerDecision(False, f"Unsupported side: {side}")
         return WorkerDecision(True, "Entry may be evaluated")
