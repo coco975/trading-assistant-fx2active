@@ -14,6 +14,7 @@
     "trendline": false
   },
   "stop_buffer_pips": 10.0,
+  "symbol": "",
   "take_profit_mode": "swing_target",
   "timeframe": "M15",
   "trading_enabled": false
