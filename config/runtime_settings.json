@@ -1,0 +1,18 @@
+{
+  "entry_trigger": "touch",
+  "fib_enabled": true,
+  "fib_retracement": 0.786,
+  "max_open_positions": 1,
+  "poi": {
+    "candle_confirmation": true,
+    "min_confirmations": 1,
+    "previous_swing": true,
+    "psychological_level": false,
+    "support_resistance": true,
+    "trendline": false
+  },
+  "stop_buffer_pips": 10.0,
+  "take_profit_mode": "swing_high",
+  "timeframe": "M15",
+  "trading_enabled": false
+}
