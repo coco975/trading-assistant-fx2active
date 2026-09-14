@@ -3,23 +3,27 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 title FX2Active Trading Assistant
 
- echo.
- echo ================================================
- echo   FX2Active Trading Assistant - Local Launcher
- echo ================================================
- echo.
- echo This launcher checks the PC, prepares the bot, verifies MT5,
- echo starts the strategy worker and opens the local control website.
- echo Nothing is hosted on the public internet.
- echo.
+echo.
+echo ================================================
+echo   FX2Active Trading Assistant - Local Launcher
+echo ================================================
+echo.
+echo This launcher checks the PC, prepares the bot, verifies MT5,
+echo starts the strategy worker and opens the local control website.
+echo Nothing is hosted on the public internet.
+echo.
 
 set "PY_CMD="
-py -3 --version >nul 2>&1
-if %errorlevel%==0 set "PY_CMD=py -3"
 
+rem Prefer the normal python.exe command first. Some PCs have a broken
+rem Windows py launcher even though Python itself is installed correctly.
+python --version >nul 2>&1
+if not errorlevel 1 set "PY_CMD=python"
+
+rem Only try the Windows Python launcher when python.exe was not found.
 if not defined PY_CMD (
-  python --version >nul 2>&1
-  if %errorlevel%==0 set "PY_CMD=python"
+  py -3 --version >nul 2>&1
+  if not errorlevel 1 set "PY_CMD=py -3"
 )
 
 if not defined PY_CMD goto :install_python
@@ -34,30 +38,33 @@ if errorlevel 1 (
   goto :winget_python
 )
 
+echo [OK] Python detected:
+%PY_CMD% --version
 goto :python_ready
 
 :install_python
- echo [MISSING] Python 3 is not installed or is not on PATH.
- echo Python runs the trading bot, diagnostics, MT5 connection and local website.
- echo.
- choice /C YN /N /M "Install Python 3.12 using Windows Package Manager? [Y/N]: "
- if errorlevel 2 goto :no_python
- goto :winget_python
+echo [MISSING] Python 3 is not installed or is not on PATH.
+echo Python runs the trading bot, diagnostics, MT5 connection and local website.
+echo.
+choice /C YN /N /M "Install Python 3.12 using Windows Package Manager? [Y/N]: "
+if errorlevel 2 goto :no_python
+goto :winget_python
 
 :winget_python
- where winget >nul 2>&1
- if errorlevel 1 (
-   echo.
-   echo Windows Package Manager ^(winget^) is not available.
-   echo Install Python 3.12 manually from python.org, then run this file again.
-   pause
-   exit /b 1
- )
- winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
- echo.
- echo Python installation finished. Close this window and run START_FX2ACTIVE.bat again.
- pause
- exit /b 0
+where winget >nul 2>&1
+if errorlevel 1 (
+  echo.
+  echo Windows Package Manager ^(winget^) is not available.
+  echo Install Python 3.12 manually from python.org, then run this file again.
+  pause
+  exit /b 1
+)
+winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
+echo.
+echo Python setup command finished.
+echo Close this window, open a new PowerShell window, then run START_FX2ACTIVE.bat again.
+pause
+exit /b 0
 
 :python_ready
 if not exist ".venv\Scripts\python.exe" (
@@ -89,6 +96,6 @@ if not "%EXIT_CODE%"=="0" (
 exit /b %EXIT_CODE%
 
 :no_python
- echo Installation cancelled. Nothing was changed.
- pause
- exit /b 1
+echo Installation cancelled. Nothing was changed.
+pause
+exit /b 1
