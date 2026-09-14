@@ -2,8 +2,11 @@
   "allow_buys": true,
   "allow_sells": true,
   "entry_trigger": "touch",
+  "execution_mode": "market_on_trigger",
   "fib_enabled": true,
   "fib_retracement": 0.786,
+  "fixed_cash_risk": 10.0,
+  "fixed_lot": 0.01,
   "max_open_positions": 1,
   "poi": {
     "candle_confirmation": true,
@@ -13,6 +16,8 @@
     "support_resistance": true,
     "trendline": false
   },
+  "risk_percent": 1.0,
+  "sizing_mode": "risk_percent",
   "stop_buffer_pips": 10.0,
   "symbol": "",
   "take_profit_mode": "swing_target",
