@@ -23,19 +23,27 @@ def _candidate_prefixes() -> list[Path]:
     ]
 
 
-def find_common_files_dirs() -> list[Path]:
-    """Locate MetaTrader's FILE_COMMON directory inside the macOS Wine prefix."""
+def _search_roots() -> list[Path]:
+    """Return safe macOS roots that may contain MetaTrader/Wine data.
 
-    override = os.environ.get("FX2ACTIVE_MT5_BRIDGE_DIR", "").strip()
-    if override:
-        path = Path(override).expanduser()
-        return [path.parent if path.name == BRIDGE_DIR_NAME else path]
+    Broker-branded MT5 builds (for example Exness) do not always use the
+    standard MetaQuotes application-support folder name, so we also search the
+    normal Wine/container roots rather than depending on a broker name.
+    """
 
-    found: list[Path] = []
-    patterns = [
-        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
-        "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
+    home = Path.home()
+    candidates = [
+        home / "Library" / "Application Support",
+        home / "Library" / "Containers",
+        home / ".wine",
     ]
+    return [path for path in candidates if path.exists()]
+
+
+def _discover_dirs(patterns: list[str]) -> list[Path]:
+    found: list[Path] = []
+
+    # Fast path for the standard MetaQuotes prefixes.
     for prefix in _candidate_prefixes():
         if not prefix.exists():
             continue
@@ -43,25 +51,53 @@ def find_common_files_dirs() -> list[Path]:
             for path in prefix.glob(pattern):
                 if path.is_dir() and path not in found:
                     found.append(path)
+
+    # Broker-branded macOS installers can use an arbitrary application-support
+    # directory. Search only the normal application/Wine roots, not the whole
+    # home directory.
+    recursive_patterns = [f"**/{pattern}" for pattern in patterns]
+    for root in _search_roots():
+        for pattern in recursive_patterns:
+            try:
+                matches = root.glob(pattern)
+                for path in matches:
+                    if path.is_dir() and path not in found:
+                        found.append(path)
+            except (OSError, PermissionError):
+                continue
+
     return found
+
+
+def find_common_files_dirs() -> list[Path]:
+    """Locate MetaTrader's FILE_COMMON directory inside a macOS Wine prefix."""
+
+    override = os.environ.get("FX2ACTIVE_MT5_BRIDGE_DIR", "").strip()
+    if override:
+        path = Path(override).expanduser()
+        return [path.parent if path.name == BRIDGE_DIR_NAME else path]
+
+    patterns = [
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
+        "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
+        "MetaQuotes/Terminal/Common/Files",
+    ]
+    return _discover_dirs(patterns)
 
 
 def find_experts_dirs() -> list[Path]:
-    """Locate installed MT5 MQL5/Experts directories inside the Wine prefix."""
+    """Locate installed MT5 MQL5/Experts directories inside macOS/Wine data."""
 
-    found: list[Path] = []
     patterns = [
         "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
         "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5/Experts",
+        "MetaQuotes/Terminal/*/MQL5/Experts",
     ]
-    for prefix in _candidate_prefixes():
-        if not prefix.exists():
-            continue
-        for pattern in patterns:
-            for path in prefix.glob(pattern):
-                if path.is_dir() and "Common" not in path.parts and path not in found:
-                    found.append(path)
-    return found
+    return [
+        path
+        for path in _discover_dirs(patterns)
+        if "Common" not in path.parts
+    ]
 
 
 def install_bridge_source(source: str | Path) -> list[Path]:
