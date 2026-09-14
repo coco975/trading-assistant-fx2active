@@ -1,43 +1,59 @@
 FX2ACTIVE - QUICK START
 =======================
 
-1. Open the broker's MetaTrader 5 terminal and log in to the intended trading account.
-2. Double-click START_FX2ACTIVE.bat.
-3. On the first run, read each dependency explanation and choose Y only if you agree to install it.
-4. Choose dashboard access:
-   [1] This PC only
-   [2] Devices on the same private Wi-Fi / LAN
-5. Wait for the system checks to complete.
+SUPPORTED COMPUTERS
+-------------------
+Windows:
+- Open the broker's MetaTrader 5 terminal and log in.
+- Double-click START_FX2ACTIVE.bat.
+- Windows uses MetaQuotes' MetaTrader5 Python bridge.
 
-THIS PC ONLY
-------------
+macOS / MacBook:
+- Install/open MetaTrader 5 for macOS and log in.
+- Double-click START_FX2ACTIVE_MAC.command.
+- macOS uses the included bridge/FX2ActiveBridge.mq5 Expert Advisor because the Windows MetaTrader5 Python IPC package is not used by native macOS Python.
+- On the first Mac setup, FX2Active copies the bridge source into detected MT5 Experts folders when possible.
+- One time only: open MetaEditor, compile Experts > FX2Active > FX2ActiveBridge.mq5, attach FX2ActiveBridge to one MT5 chart, enable Algo Trading, and leave that chart open.
+
+FIRST RUN
+---------
+1. Start the correct launcher for your operating system.
+2. Read each dependency explanation and approve only the installations you want.
+3. FX2Active creates a private .venv environment for its Python packages.
+4. Choose dashboard access:
+   [1] This computer only
+   [2] Devices on the same private Wi-Fi / LAN
+5. Wait for diagnostics to pass and the dashboard to open.
+
+THIS COMPUTER ONLY
+------------------
 The dashboard opens at:
 http://127.0.0.1:8080
 
 PRIVATE WI-FI / LAN MODE
 ------------------------
-The launcher generates a temporary 6-digit PIN for that run and prints:
-- the exact private-network dashboard address, such as http://192.168.1.25:8080
-- Username: fx2active
-- Access PIN: the temporary 6-digit PIN
+The launcher generates a temporary 6-digit PIN and prints the exact private-network dashboard address, for example:
+http://192.168.1.25:8080
 
-Open that private-network address on a phone, iPad or another computer connected to the same private Wi-Fi/LAN. The browser will request the username and PIN.
+Open that address on a phone, iPad, Mac or other computer on the same trusted private Wi-Fi/LAN.
 
-If Windows Firewall asks whether Python may communicate on the network, allow PRIVATE networks only. Do not enable Public networks and do not create router port forwarding for port 8080.
+The remote browser shows an FX2Active login page. Enter the 6-digit PIN once. FX2Active then creates a browser-session cookie, so refreshes, new pages and normal dashboard use do not ask for the PIN again during that browser session. Closing the browser session or restarting FX2Active ends the session.
+
+Windows Firewall: allow Python on PRIVATE networks only if prompted.
+macOS Firewall: allow incoming connections for the local Python process if prompted.
+Do not create router port forwarding for port 8080.
 
 TRADING SETTINGS
 ----------------
 6. Set the exact MT5 Trading Symbol and choose the strategy rules.
-7. In Risk & Position Size, choose either Risk % of account equity, Fixed lot size, or Fixed cash risk.
-8. In Order Execution, choose either Market order after confirmation or Pending limit at the 78.6% Fib price.
+7. In Risk & Position Size, choose Risk % of account equity, Fixed lot size, or Fixed cash risk.
+8. In Order Execution, choose Market order after confirmation or Pending limit at the 78.6% Fib price.
 9. Press Done - Apply to Bot. The worker reloads the saved settings automatically.
 10. Keep the FX2Active launcher window open while the system is running.
 11. Press Ctrl+C in that window when you want to stop it.
 
-No Vercel account, Cloudflare tunnel, web-control key, router port forwarding, or public website is required.
+No Vercel account, Cloudflare tunnel, router port forwarding, or public website is required for local/LAN mode.
 
-LAN mode is for a trusted private network only. The server rejects non-private client IP addresses and requires the temporary dashboard PIN.
+LAN mode is for a trusted private network only. The server rejects non-private client IP addresses and requires a valid browser session created with the temporary PIN.
 
-If startup shows an MT5 error, make sure MT5 is open, connected, logged in, AutoTrading is allowed, and external Python trading is not disabled.
-
-IMPORTANT: The current build evaluates live MT5 setups and stores the chosen sizing/execution rules, but live broker order submission is still disabled until the MT5 order-execution adapter is enabled and tested.
+IMPORTANT: The current build evaluates live MT5 setups and calculates planned position sizing on Windows and macOS. Live broker order submission is still disabled until the MT5 order-execution adapter is enabled and tested.
