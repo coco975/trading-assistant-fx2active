@@ -47,9 +47,26 @@
       <article class="card">
         <h2>Entry</h2>
         <label>Trading symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. EURUSD or EURUSD.a" autocomplete="off"></label>
-        <label>Trigger<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
+        <label>Confirmation trigger<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
         <label>Maximum open positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
         <div class="locked"><span>M15 timeframe</span><span>BUY + SELL</span></div>
+      </article>
+
+      <article class="card">
+        <h2>Risk & Position Size</h2>
+        <p class="muted">Choose how this account should size each trade.</p>
+        <label>Position sizing<select id="sizing_mode"><option value="risk_percent">Risk % of account equity</option><option value="fixed_lot">Fixed lot size</option><option value="fixed_cash">Fixed cash risk</option></select></label>
+        <label id="risk-percent-row" class="conditional">Risk per trade (%)<input id="risk_percent" type="number" min="0.01" max="100" step="0.01"></label>
+        <label id="fixed-lot-row" class="conditional hidden">Lot size<input id="fixed_lot" type="number" min="0.001" step="0.001"></label>
+        <label id="fixed-cash-row" class="conditional hidden">Cash risk per trade<input id="fixed_cash_risk" type="number" min="0.01" step="0.01"><small>Uses the currency of the connected MT5 account.</small></label>
+      </article>
+
+      <article class="card">
+        <h2>Order Execution</h2>
+        <p class="muted">Choose how a qualified setup should enter the market.</p>
+        <label>Execution mode<select id="execution_mode"><option value="market_on_trigger">Market order after confirmation trigger</option><option value="pending_limit">Pending limit at the 78.6% Fib price</option></select></label>
+        <div id="execution-help" class="locked"><span>Market mode</span><span>Uses the Entry confirmation above</span></div>
+        <p class="muted compact-note">This setting is saved now. Live order submission remains disabled until the MT5 execution adapter is enabled and tested.</p>
       </article>
 
       <article class="card wide">
