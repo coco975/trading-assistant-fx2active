@@ -35,6 +35,16 @@ class RuntimeSettings:
     take_profit_mode: str = "swing_target"
     entry_trigger: str = "touch"
     max_open_positions: int = 1
+
+    # The account owner controls position sizing from the local dashboard.
+    sizing_mode: str = "risk_percent"
+    risk_percent: float = 1.0
+    fixed_lot: float = 0.01
+    fixed_cash_risk: float = 10.0
+
+    # This controls how a qualified setup should eventually be submitted to MT5.
+    execution_mode: str = "market_on_trigger"
+
     poi: PoiSettings = field(default_factory=PoiSettings)
 
     def __post_init__(self) -> None:
@@ -52,13 +62,23 @@ class RuntimeSettings:
             raise ValueError("unsupported entry_trigger")
         if not 1 <= self.max_open_positions <= 20:
             raise ValueError("max_open_positions must be between 1 and 20")
+        if self.sizing_mode not in {"risk_percent", "fixed_lot", "fixed_cash"}:
+            raise ValueError("unsupported sizing_mode")
+        if not 0 < self.risk_percent <= 100:
+            raise ValueError("risk_percent must be above 0 and at most 100")
+        if self.fixed_lot <= 0:
+            raise ValueError("fixed_lot must be positive")
+        if self.fixed_cash_risk <= 0:
+            raise ValueError("fixed_cash_risk must be positive")
+        if self.execution_mode not in {"market_on_trigger", "pending_limit"}:
+            raise ValueError("unsupported execution_mode")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
         payload = dict(data)
         poi_data = payload.pop("poi", {})
 
-        # Backward compatibility with the first long-only dashboard settings.
+        # Backward compatibility with earlier dashboard settings.
         if payload.get("take_profit_mode") == "swing_high":
             payload["take_profit_mode"] = "swing_target"
         old_trigger = payload.get("entry_trigger")
@@ -66,9 +86,15 @@ class RuntimeSettings:
             payload["entry_trigger"] = "close_back_in_direction"
         elif old_trigger == "bullish_close":
             payload["entry_trigger"] = "directional_close"
+
         payload.setdefault("allow_buys", True)
         payload.setdefault("allow_sells", True)
         payload.setdefault("symbol", "")
+        payload.setdefault("sizing_mode", "risk_percent")
+        payload.setdefault("risk_percent", 1.0)
+        payload.setdefault("fixed_lot", 0.01)
+        payload.setdefault("fixed_cash_risk", 10.0)
+        payload.setdefault("execution_mode", "market_on_trigger")
         payload["symbol"] = str(payload["symbol"]).strip()
 
         return cls(**payload, poi=PoiSettings(**poi_data))
