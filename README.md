@@ -1,122 +1,101 @@
 # FX2Active Trading Assistant
 
-FX2Active is a local trading assistant for MT5 with a browser control panel.
+FX2Active is a local MT5 trading assistant with a browser control panel for **Windows and macOS**.
 
-It supports:
-- Windows
-- macOS
-- Local dashboard access
-- Same-Wi-Fi dashboard access
-- BUY and SELL setup detection
-- M15 78.6% Fibonacci strategy settings
-- Risk %, fixed lot, and fixed cash sizing
+## Before You Start
 
-## Main files
-
-- `START_FX2ACTIVE.bat` — Windows launcher
-- `START_FX2ACTIVE_MAC.command` — macOS launcher
-- `bridge/FX2ActiveBridge.mq5` — macOS MT5 bridge
-- `config/runtime_settings.json` — saved bot settings
-- `web/` — dashboard files
+- Install MetaTrader 5.
+- Log into the trading account you want FX2Active to use.
+- Make sure your GitHub account has access to this private repository.
 
 # Windows Setup
 
-## First time
+Open **PowerShell** and run these commands one at a time.
 
-1. Install MetaTrader 5.
-2. Open MT5 and log into the trading account.
-3. Download or clone this repository.
-4. Open the FX2Active folder.
-5. Double-click `START_FX2ACTIVE.bat`.
-6. Approve Python/dependency installation if asked.
-7. Choose dashboard access:
-   - `1` = this PC only
-   - `2` = devices on the same Wi-Fi/LAN
-8. Wait for the system checks to finish.
-9. The dashboard opens automatically.
-10. Set the MT5 symbol, risk, BUY/SELL settings, and strategy options.
-11. Press **Done - Apply to Bot**.
+```powershell
+cd $HOME\Documents
+git clone https://github.com/coco975/trading-assistant-fx2active.git
+cd trading-assistant-fx2active
+.\START_FX2ACTIVE.bat
+```
 
-## Normal Windows use
+If `git` is not installed:
 
-1. Open MT5.
-2. Log into the correct account.
-3. Double-click `START_FX2ACTIVE.bat`.
-4. Choose dashboard access.
-5. Leave the launcher window open while FX2Active is running.
+```powershell
+winget install --id Git.Git -e
+```
+
+Then close PowerShell, open it again, and run the setup commands above.
+
+### Start it again later
+
+```powershell
+cd $HOME\Documents\trading-assistant-fx2active
+git pull
+.\START_FX2ACTIVE.bat
+```
 
 # macOS Setup
 
-## First time
+Open **Terminal** and run these commands one at a time.
 
-1. Install MetaTrader 5 for Mac.
-2. Open MT5 and log into the trading account.
-3. Download or clone this repository.
-4. Open the FX2Active folder.
-5. Double-click `START_FX2ACTIVE_MAC.command`.
-6. Approve Python/dependency installation if asked.
-7. Let FX2Active copy `FX2ActiveBridge.mq5` into MT5 when detected.
-8. Open MetaEditor from MT5.
-9. Find `FX2ActiveBridge.mq5` under Experts/FX2Active.
-10. Compile it.
-11. Return to MT5.
-12. Attach **FX2ActiveBridge** to one chart.
-13. Enable Algo Trading.
-14. Keep that chart open.
-15. Run `START_FX2ACTIVE_MAC.command` again if needed.
-16. Choose dashboard access:
-   - `1` = this Mac only
-   - `2` = devices on the same Wi-Fi/LAN
-17. Wait for the system checks to finish.
-18. Configure the dashboard and press **Done - Apply to Bot**.
+```bash
+cd ~/Documents
+git clone https://github.com/coco975/trading-assistant-fx2active.git
+cd trading-assistant-fx2active
+chmod +x START_FX2ACTIVE_MAC.command
+./START_FX2ACTIVE_MAC.command
+```
 
-## Normal Mac use
+If macOS asks to install Command Line Tools/Git, allow it and then run the commands again.
 
-1. Open MT5.
-2. Make sure **FX2ActiveBridge** is attached and running.
-3. Double-click `START_FX2ACTIVE_MAC.command`.
-4. Choose dashboard access.
-5. Leave the launcher window open while FX2Active is running.
+On the first Mac setup, FX2Active uses `FX2ActiveBridge.mq5` to connect the local app to MT5. Follow the launcher instructions to compile it in MetaEditor, attach **FX2ActiveBridge** to one MT5 chart, and enable Algo Trading.
+
+### Start it again later
+
+```bash
+cd ~/Documents/trading-assistant-fx2active
+git pull
+./START_FX2ACTIVE_MAC.command
+```
 
 # Dashboard Access
 
-## This computer only
+When FX2Active starts, choose:
 
-Open:
+- **1 — This computer only**: use the dashboard only on the PC/Mac running FX2Active.
+- **2 — Same Wi-Fi/LAN**: open the dashboard from another phone, tablet, or computer on the same private network.
 
-```text
-http://127.0.0.1:8080
-```
+For option 2, the launcher shows a dashboard address and PIN. Open the address on the other device and enter the PIN once. You stay signed in for that browser session.
 
-## Another device on the same Wi-Fi
+# Web Interface
 
-Choose option `2` when starting FX2Active.
-
-The launcher will show an address like:
-
-```text
-http://192.168.1.25:8080
-```
-
-It will also show a temporary PIN.
-
-On the second device:
-
-1. Connect to the same Wi-Fi.
-2. Open the address shown by FX2Active.
-3. Enter the PIN once.
-4. Stay signed in for that browser session.
+- **Trading enabled** — master switch for allowing new setups.
+- **Worker / MT5 / Account** — shows whether FX2Active, MT5, and the trading account are connected.
+- **Trading symbol** — enter the exact MT5 symbol, for example `EURUSD`, `XAUUSD`, or the broker's version such as `XAUUSD.x`.
+- **BUY / SELL** — choose which trade directions FX2Active may use.
+- **Fib retracement** — strategy retracement level. Default is `0.786`.
+- **Stop buffer** — extra pips beyond the swing used for the stop loss.
+- **Confirmation trigger** — decides what must happen at the Fib level before a setup qualifies.
+- **Maximum open positions** — maximum number of positions allowed at once.
+- **Risk %** — risk a percentage of account equity per trade.
+- **Fixed lot** — always use the selected lot size.
+- **Fixed cash** — risk a fixed amount in the MT5 account currency.
+- **Market after confirmation** — enter after the selected confirmation trigger.
+- **Pending at 78.6%** — use the Fib price as the intended pending-entry level.
+- **Points of Interest** — extra confirmations such as support/resistance, previous swing, trendline, round-number level, and candle confirmation.
+- **Minimum confirmations** — how many enabled POIs must agree before the setup qualifies.
+- **Run system check** — checks the computer, MT5 connection, account, and FX2Active setup.
+- **Done — Apply to Bot** — saves the settings and applies them to the worker.
 
 # Stop FX2Active
 
-In the launcher window press:
+Keep the launcher/Terminal window open while FX2Active is running.
+
+Press:
 
 ```text
 Ctrl + C
 ```
 
-# Important
-
-- Keep MT5 open while FX2Active is running.
-- Do not expose port `8080` using router port forwarding.
-- Live broker order submission is currently disabled while the execution layer is being completed and tested.
+> Live broker order submission is currently disabled while the execution layer is being completed and tested.
