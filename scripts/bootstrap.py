@@ -88,23 +88,24 @@ def prepare_macos_bridge() -> None:
         return
 
     source = ROOT / "bridge" / "FX2ActiveBridge.mq5"
+    print("[SETUP] Checking the running MetaTrader installation for the FX2Active bridge...")
     installed = install_bridge_source(source)
     if installed:
-        print("\n[SETUP] FX2ActiveBridge.mq5 was copied into MetaTrader's Experts folder.")
-        print("One-time MetaTrader step:")
-        print("  1. Open MetaTrader 5 and MetaEditor.")
-        print("  2. In Experts > FX2Active, open FX2ActiveBridge.mq5 and press Compile.")
-        print("  3. Return to MT5, attach FX2ActiveBridge to one chart, and enable Algo Trading.")
-        print("  4. Leave that chart open, then use Run system check in the dashboard.")
+        print("[OK] FX2Active created its MT5 Experts folder and copied the bridge automatically.")
+        for path in installed[:3]:
+            print(f"     {path}")
+        if len(installed) > 3:
+            print(f"     ...and {len(installed) - 3} additional MT5 location(s)")
+        print("One-time MT5 step still required:")
+        print("  1. Open MetaEditor from MT5 and compile FX2ActiveBridge.mq5.")
+        print("  2. Return to MT5 and attach FX2ActiveBridge to one chart.")
+        print("  3. Enable Algo Trading and leave that chart open.")
+        print("  4. Use Run system check in the FX2Active dashboard.")
     else:
-        print("\n[SETUP] MetaTrader's macOS data folder could not be detected automatically.")
-        print("If MT5 is already open, use MT5 > File > Open Data Folder, then:")
-        print("  1. Open MQL5 > Experts.")
-        print("  2. Create a folder named FX2Active.")
-        print(f"  3. Copy this file into it: {source}")
-        print("  4. Open MetaEditor, compile FX2ActiveBridge.mq5, attach it to one chart,")
-        print("     enable Algo Trading, and leave the chart open.")
-        print("The dashboard will still open so you can see system status and retry checks.")
+        print("[WARN] FX2Active could not identify the active MT5 data folder yet.")
+        print("Keep the Exness/MetaTrader 5 terminal open, then restart FX2Active.")
+        print("You do not need to manually create or copy the FX2Active folder.")
+        print("The dashboard will still open while MT5 setup is incomplete.")
 
 
 def main() -> int:
