@@ -1,4 +1,4 @@
-# FX2Active Strategy Specification — v0.2
+# FX2Active Strategy Specification — v0.3
 
 ## Timeframe
 
@@ -6,9 +6,11 @@ M15 only for this test build.
 
 ## Direction
 
-LONG only in the current version.
+The bot supports both BUY and SELL setups. Either side can be enabled or disabled independently from the web control panel.
 
 ## Fibonacci placement
+
+### BUY
 
 For a completed bullish impulse:
 
@@ -19,23 +21,46 @@ For a completed bullish impulse:
 5. Treat Swing High as 0%.
 6. Default entry retracement is 78.6%.
 
-## Calculation
-
-Let:
-
-- `L` = swing low
-- `H` = swing high
-- `R = H - L`
-
-Then:
+Let `L` be the swing low, `H` the swing high, and `R = H - L`:
 
 ```text
-entry = H - fib_retracement * R
-stop = L - stop_buffer_pips * pip_size
-target = H
+BUY entry = H - fib_retracement * R
+BUY stop = L - stop_buffer_pips * pip_size
+BUY target = H
+```
+
+### SELL
+
+For a completed bearish impulse:
+
+1. Identify a confirmed Swing High.
+2. Identify the subsequent confirmed Swing Low.
+3. Draw Fibonacci from Swing High to Swing Low.
+4. Treat Swing High as 100%.
+5. Treat Swing Low as 0%.
+6. Default entry retracement is 78.6%.
+
+Let `H` be the swing high, `L` the swing low, and `R = H - L`:
+
+```text
+SELL entry = L + fib_retracement * R
+SELL stop = H + stop_buffer_pips * pip_size
+SELL target = L
 ```
 
 The web panel defaults `fib_retracement` to `0.786` and `stop_buffer_pips` to `10`.
+
+## Stop loss
+
+- BUY: default 10 pips below the 100% Fib / Swing Low.
+- SELL: default 10 pips above the 100% Fib / Swing High.
+
+`pip_size` remains instrument configuration and is not globally hard-coded.
+
+## Take profit
+
+- BUY: retracement Swing High / 0% Fib.
+- SELL: retracement Swing Low / 0% Fib.
 
 ## Web-controlled runtime rules
 
@@ -44,6 +69,8 @@ The strategy reloads `config/runtime_settings.json` on each evaluation. The web 
 Runtime controls include:
 
 - master trading enabled switch
+- BUY enabled switch
+- SELL enabled switch
 - Fibonacci rule enabled switch
 - Fibonacci retracement value
 - stop buffer in pips
@@ -54,19 +81,21 @@ Runtime controls include:
 
 ## Entry triggers
 
-The user can select one of three entry-trigger policies:
+The user can select one of three directional entry-trigger policies:
 
 ### `touch`
 
 The latest candle must trade through the calculated Fib entry.
 
-### `close_back_above`
+### `close_back_in_direction`
 
-The latest candle must trade at/below the Fib entry and then close above it.
+- BUY: price touches the entry and closes back above it.
+- SELL: price touches the entry and closes back below it.
 
-### `bullish_close`
+### `directional_close`
 
-The latest candle must touch the Fib entry and close bullish at/above the entry.
+- BUY: price touches the entry and the candle closes bullish at/above it.
+- SELL: price touches the entry and the candle closes bearish at/below it.
 
 ## Points of interest / confluence
 
@@ -80,23 +109,13 @@ The following categories can be enabled or disabled individually:
 
 Enabled categories are candidate confirmations. `min_confirmations` controls how many of the enabled categories must actually be present before a setup passes.
 
+Directional confirmation is mirrored: bullish evidence is used for BUY setups and bearish evidence is used for SELL setups. Trendline logic uses swing lows for BUY and swing highs for SELL.
+
 The current implementation uses deterministic test heuristics for each category. They are bot engineering definitions inspired by common technical-analysis concepts; they are not claimed to be proprietary BabyPips algorithms.
 
 ## Position limit
 
 Before evaluating a new entry, the worker compares the number of currently open positions with `max_open_positions`. If the limit is already reached, no new setup is returned.
-
-## Stop loss
-
-Default: 10 pips below the 100% Fib / Swing Low. `pip_size` remains instrument configuration and is not globally hard-coded.
-
-## Take profit
-
-Current mode: Swing High / 0% Fib.
-
-## Short trades
-
-Not enabled yet. A mirrored bearish specification should be added only when the exact rules are supplied.
 
 ## Deployment status
 
