@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import subprocess
 import sys
+from importlib import metadata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,33 +25,48 @@ def ask_yes_no(question: str, *, default: bool = False) -> bool:
         print("Please type Y or N.")
 
 
-def ensure_python_packages() -> None:
-    missing: list[str] = []
-    if importlib.util.find_spec("MetaTrader5") is None:
-        missing.append("MetaTrader5")
+def project_is_installed() -> bool:
+    try:
+        metadata.version("trading-assistant-fx2active")
+        return True
+    except metadata.PackageNotFoundError:
+        return False
 
-    if not missing:
+
+def ensure_python_packages() -> None:
+    mt5_missing = importlib.util.find_spec("MetaTrader5") is None
+    project_missing = not project_is_installed()
+
+    if not mt5_missing and not project_missing:
         print("[OK] Required Python packages are already installed.")
         return
 
-    print("\n[MISSING] Required Python package(s):")
-    for name in missing:
-        if name == "MetaTrader5":
-            print("  - MetaTrader5: the official Python bridge used to read MT5 prices, account state and positions.")
-    print("\nThese packages are installed only inside this bot's .venv folder, not system-wide.")
-    if not ask_yes_no("Install the missing package(s) now?"):
+    print("\n[SETUP] This bot needs its local Python runtime prepared.")
+    if project_missing:
+        print(
+            "  - FX2Active project package: registers this repository inside the "
+            "private .venv so the launcher can import the bot reliably."
+        )
+    if mt5_missing:
+        print(
+            "  - MetaTrader5: the Python bridge used to read MT5 prices, account "
+            "state and positions."
+        )
+    print("\nInstallation is limited to this bot's .venv folder, not system-wide.")
+    if not ask_yes_no("Prepare the bot's required Python packages now?"):
         raise SystemExit("Setup cancelled before installing dependencies.")
 
     cmd = [sys.executable, "-m", "pip", "install", "-e", str(ROOT)]
     print("\nInstalling required packages...")
     subprocess.check_call(cmd)
-    print("[OK] Python dependencies installed.")
+    print("[OK] Python runtime prepared.")
 
 
 def main() -> int:
     print("\n--- FX2Active first-run / startup checks ---")
     if sys.version_info < (3, 11):
         print(f"[ERROR] Python {sys.version.split()[0]} is too old. Python 3.11+ is required.")
+        print("Install Python 3.12, delete the .venv folder, then run START_FX2ACTIVE.bat again.")
         return 1
 
     ensure_python_packages()
@@ -66,7 +82,8 @@ def main() -> int:
 
     if not report["ready"]:
         print("\nThe bot is not ready to start yet.")
-        print("Fix the ERROR item(s) above, then run START_FX2ACTIVE.bat again.")
+        print("For MT5 errors: open the intended broker's MT5 terminal and log into the account.")
+        print("Then run START_FX2ACTIVE.bat again.")
         return 1
 
     print("\n[OK] Diagnostics passed. Starting local worker + dashboard...")
