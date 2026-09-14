@@ -90,8 +90,14 @@ def prepare_macos_bridge() -> None:
         print("  3. Return to MT5, attach FX2ActiveBridge to one chart, and enable Algo Trading.")
         print("  4. Leave that chart open, then run this launcher again.")
     else:
-        print("\n[SETUP] MetaTrader's macOS data folder was not found yet.")
-        print("Install/open MetaTrader 5 once, then run FX2Active again so the bridge can be copied in.")
+        print("\n[SETUP] MetaTrader's macOS data folder could not be detected automatically.")
+        print("If MT5 is already open, use MT5 > File > Open Data Folder, then:")
+        print("  1. Open MQL5 > Experts.")
+        print("  2. Create a folder named FX2Active.")
+        print(f"  3. Copy this file into it: {source}")
+        print("  4. Open MetaEditor, compile FX2ActiveBridge.mq5, attach it to one chart,")
+        print("     enable Algo Trading, and leave the chart open.")
+        print("Then run the FX2Active launcher again.")
 
 
 def main() -> int:
