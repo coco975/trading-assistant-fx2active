@@ -83,10 +83,11 @@ def run_diagnostics(
             "trading_enabled": settings.trading_enabled,
             "allow_buys": settings.allow_buys,
             "allow_sells": settings.allow_sells,
+            "symbol": settings.symbol,
             "max_open_positions": settings.max_open_positions,
             "timeframe": settings.timeframe,
         }
-    except Exception as exc:  # startup diagnostic should report instead of crash
+    except Exception as exc:
         checks.append(DiagnosticCheck("Strategy settings", False, str(exc)))
 
     if include_port_check:
@@ -107,69 +108,71 @@ def run_diagnostics(
             import MetaTrader5 as mt5
 
             if not mt5.initialize():
-                error = mt5.last_error()
                 checks.append(
                     DiagnosticCheck(
                         "MT5 terminal",
                         False,
-                        f"Could not connect to an installed/running MT5 terminal. MT5 error: {error}",
+                        f"Could not connect to an installed/running MT5 terminal. MT5 error: {mt5.last_error()}",
                     )
                 )
             else:
-                terminal = mt5.terminal_info()
-                account = mt5.account_info()
+                try:
+                    terminal = mt5.terminal_info()
+                    account = mt5.account_info()
 
-                connected = bool(getattr(terminal, "connected", False)) if terminal else False
-                checks.append(
-                    DiagnosticCheck(
-                        "MT5 terminal",
-                        connected,
-                        "MT5 terminal is connected" if connected else "MT5 terminal is open but not connected",
-                    )
-                )
-
-                if account is None:
+                    connected = bool(getattr(terminal, "connected", False)) if terminal else False
                     checks.append(
                         DiagnosticCheck(
-                            "MT5 account",
-                            False,
-                            "No logged-in MT5 trading account was detected",
+                            "MT5 terminal",
+                            connected,
+                            "MT5 terminal is connected" if connected else "MT5 terminal is open but not connected",
                         )
                     )
-                else:
-                    server = getattr(account, "server", None)
-                    login = getattr(account, "login", None)
-                    trade_allowed = bool(getattr(account, "trade_allowed", True))
+
+                    terminal_trade_allowed = bool(getattr(terminal, "trade_allowed", False)) if terminal else False
+                    trade_api_disabled = bool(getattr(terminal, "tradeapi_disabled", True)) if terminal else True
+                    permission_ok = terminal_trade_allowed and not trade_api_disabled
+                    if permission_ok:
+                        permission_message = "MT5 AutoTrading/Python trading access is enabled"
+                    elif trade_api_disabled:
+                        permission_message = "MT5 is blocking trading through the external Python API"
+                    else:
+                        permission_message = "MT5 AutoTrading is currently disabled"
                     checks.append(
                         DiagnosticCheck(
-                            "MT5 account",
-                            True,
-                            f"Logged in on {server or 'unknown server'} as {_mask_login(login) or 'account'}",
+                            "AutoTrading / API permission",
+                            permission_ok,
+                            permission_message,
                         )
                     )
-                    if not trade_allowed:
+
+                    if account is None:
                         checks.append(
                             DiagnosticCheck(
-                                "Trading permission",
+                                "MT5 account",
                                 False,
-                                "The connected MT5 account currently reports trading as not allowed",
+                                "No logged-in MT5 trading account was detected",
                             )
                         )
                     else:
+                        server = getattr(account, "server", None)
+                        login = getattr(account, "login", None)
                         checks.append(
                             DiagnosticCheck(
-                                "Trading permission",
+                                "MT5 account",
                                 True,
-                                "MT5 account allows trading",
+                                f"Logged in on {server or 'unknown server'} as {_mask_login(login) or 'account'}",
                             )
                         )
-                    details["mt5"] = {
-                        "connected": connected,
-                        "server": server,
-                        "login_masked": _mask_login(login),
-                        "trade_allowed": trade_allowed,
-                    }
-                mt5.shutdown()
+                        details["mt5"] = {
+                            "connected": connected,
+                            "server": server,
+                            "login_masked": _mask_login(login),
+                            "trade_allowed": terminal_trade_allowed,
+                            "trade_api_disabled": trade_api_disabled,
+                        }
+                finally:
+                    mt5.shutdown()
         except Exception as exc:
             checks.append(DiagnosticCheck("MT5 diagnostic", False, f"MT5 check failed: {exc}"))
 
