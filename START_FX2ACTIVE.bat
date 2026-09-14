@@ -90,7 +90,7 @@ echo ------------------------------------------------
 echo Dashboard access
 echo ------------------------------------------------
 echo [1] This PC only
-necho [2] Devices on the same private Wi-Fi / LAN
+echo [2] Devices on the same private Wi-Fi / LAN
 choice /C 12 /N /M "Choose 1 or 2: "
 if errorlevel 2 goto :lan_access
 
