@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
+import subprocess
 import time
-from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -12,6 +13,9 @@ BRIDGE_DIR_NAME = "FX2Active"
 SNAPSHOT_FILE = "snapshot.json"
 REQUESTED_SYMBOL_FILE = "requested_symbol.txt"
 BRIDGE_STALE_SECONDS = 15.0
+PREFIX_CACHE_SECONDS = 10.0
+
+_prefix_cache: tuple[float, tuple[Path, ...]] | None = None
 
 
 def _candidate_prefixes() -> list[Path]:
@@ -21,26 +25,12 @@ def _candidate_prefixes() -> list[Path]:
         app_support / "net.metaquotes.wine.metatrader5",
         app_support / "MetaTrader 5",
         app_support / "Metatrader 5",
+        app_support / "MetaTrader5",
     ]
 
 
-def _search_roots() -> list[Path]:
-    home = Path.home()
-    candidates = [
-        home / "Library" / "Application Support",
-        home / "Library" / "Containers",
-        home / ".wine",
-    ]
-    return [path for path in candidates if path.is_dir()]
-
-
-def _bounded_dirs(root: Path, *, max_depth: int = 3) -> Iterator[Path]:
-    """Yield directories under root without recursively walking the whole Mac.
-
-    Broker-branded MT5 installations can use their own Application Support
-    folder. We only need to discover Wine prefixes, so a shallow scan is much
-    faster and avoids walking caches, browser data and unrelated containers.
-    """
+def _bounded_dirs(root: Path, *, max_depth: int = 4) -> Iterator[Path]:
+    """Yield directories below root without walking an entire user profile."""
 
     root_depth = len(root.parts)
     stack = [root]
@@ -70,39 +60,189 @@ def _bounded_dirs(root: Path, *, max_depth: int = 3) -> Iterator[Path]:
                 continue
 
 
-@lru_cache(maxsize=1)
-def _wine_prefixes() -> tuple[Path, ...]:
-    """Find standard and broker-branded Wine prefixes quickly."""
+def _looks_like_mt5_name(name: str) -> bool:
+    text = name.lower().replace(" ", "")
+    return any(
+        token in text
+        for token in (
+            "metatrader",
+            "metaquotes",
+            "mt5",
+            "exness",
+            "wine",
+        )
+    )
 
+
+def _path_prefix_from_drive_c(path_text: str) -> Path | None:
+    normalized = path_text.strip().strip('"').replace("\\ ", " ")
+    marker = "/drive_c/"
+    index = normalized.find(marker)
+    if index <= 0:
+        return None
+    prefix = Path(normalized[:index]).expanduser()
+    return prefix if prefix.is_dir() else None
+
+
+def _prefixes_from_command(command: str) -> list[Path]:
     found: list[Path] = []
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        parts = command.split()
 
-    for prefix in _candidate_prefixes():
-        if prefix.is_dir() and prefix not in found:
+    for part in parts:
+        prefix = _path_prefix_from_drive_c(part)
+        if prefix is not None and prefix not in found:
             found.append(prefix)
 
-    for root in _search_roots():
-        # ~/.wine is itself normally the prefix.
-        if (root / "drive_c").is_dir() and root not in found:
-            found.append(root)
+        if part.startswith("WINEPREFIX="):
+            value = part.split("=", 1)[1].strip().strip('"').strip("'")
+            candidate = Path(value).expanduser()
+            if candidate.is_dir() and (candidate / "drive_c").is_dir() and candidate not in found:
+                found.append(candidate)
+    return found
 
-        for candidate in _bounded_dirs(root, max_depth=3):
+
+def _running_mt5_prefixes() -> list[Path]:
+    """Infer the active Wine prefix from a running MT5/Exness process."""
+
+    found: list[Path] = []
+    pids: list[str] = []
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,command="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return found
+
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        pieces = line.split(None, 1)
+        if len(pieces) != 2:
+            continue
+        pid, command = pieces
+        lower = command.lower()
+        if not any(
+            token in lower
+            for token in ("terminal64.exe", "metaeditor64.exe", "metatrader", "exness")
+        ):
+            continue
+
+        if pid.isdigit() and pid not in pids:
+            pids.append(pid)
+        for prefix in _prefixes_from_command(command):
+            if prefix not in found:
+                found.append(prefix)
+
+    # Wine command lines are not always descriptive. lsof normally exposes at
+    # least one file underneath the active prefix, which lets us recover it.
+    for pid in pids[:8]:
+        try:
+            opened = subprocess.run(
+                ["lsof", "-Fn", "-p", pid],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+
+        for line in opened.stdout.splitlines():
+            if not line.startswith("n"):
+                continue
+            prefix = _path_prefix_from_drive_c(line[1:])
+            if prefix is not None and prefix not in found:
+                found.append(prefix)
+
+    return found
+
+
+def _named_mac_candidates() -> list[Path]:
+    """Return likely broker/Wine roots without recursively scanning the Mac."""
+
+    home = Path.home()
+    roots = [
+        home / "Library" / "Application Support",
+        home / "Library" / "Containers",
+        Path("/Applications"),
+        home / "Applications",
+    ]
+    found: list[Path] = []
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        try:
+            children = list(root.iterdir())
+        except (OSError, PermissionError):
+            continue
+        for child in children:
             try:
-                if (candidate / "drive_c").is_dir() and candidate not in found:
-                    found.append(candidate)
+                if child.is_dir() and _looks_like_mt5_name(child.name) and child not in found:
+                    found.append(child)
             except (OSError, PermissionError):
                 continue
 
-    return tuple(found)
+    wine = home / ".wine"
+    if wine.is_dir():
+        found.append(wine)
+    return found
 
 
-def _discover_dirs(patterns: list[str]) -> list[Path]:
+def _wine_prefixes(*, force_refresh: bool = False) -> tuple[Path, ...]:
+    global _prefix_cache
+
+    now = time.monotonic()
+    if (
+        not force_refresh
+        and _prefix_cache is not None
+        and now - _prefix_cache[0] <= PREFIX_CACHE_SECONDS
+    ):
+        return _prefix_cache[1]
+
     found: list[Path] = []
 
-    for prefix in _wine_prefixes():
+    def add(candidate: Path) -> None:
+        try:
+            candidate = candidate.expanduser()
+            if candidate.is_dir() and (candidate / "drive_c").is_dir() and candidate not in found:
+                found.append(candidate)
+        except (OSError, PermissionError):
+            return
+
+    for prefix in _candidate_prefixes():
+        add(prefix)
+
+    for prefix in _running_mt5_prefixes():
+        add(prefix)
+
+    for root in _named_mac_candidates():
+        add(root)
+        # Broker-branded wrappers may place the actual prefix a few folders
+        # below their top-level Application Support or .app directory.
+        for candidate in _bounded_dirs(root, max_depth=6):
+            add(candidate)
+
+    result = tuple(found)
+    _prefix_cache = (now, result)
+    return result
+
+
+def _discover_dirs(patterns: list[str], *, force_refresh: bool = False) -> list[Path]:
+    found: list[Path] = []
+
+    for prefix in _wine_prefixes(force_refresh=force_refresh):
         for pattern in patterns:
             try:
-                matches = prefix.glob(pattern)
-                for path in matches:
+                for path in prefix.glob(pattern):
                     if path.is_dir() and path not in found:
                         found.append(path)
             except (OSError, PermissionError):
@@ -111,7 +251,7 @@ def _discover_dirs(patterns: list[str]) -> list[Path]:
     return found
 
 
-def find_common_files_dirs() -> list[Path]:
+def find_common_files_dirs(*, force_refresh: bool = False) -> list[Path]:
     """Locate MetaTrader's FILE_COMMON directory inside a macOS Wine prefix."""
 
     override = os.environ.get("FX2ACTIVE_MT5_BRIDGE_DIR", "").strip()
@@ -122,30 +262,55 @@ def find_common_files_dirs() -> list[Path]:
     patterns = [
         "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
         "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
-        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files/",
     ]
-    return _discover_dirs(patterns)
+    return _discover_dirs(patterns, force_refresh=force_refresh)
 
 
-def find_experts_dirs() -> list[Path]:
-    """Locate installed MT5 MQL5/Experts directories inside macOS/Wine data."""
-
+def _find_mql5_dirs(*, force_refresh: bool = False) -> list[Path]:
     patterns = [
-        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
-        "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5/Experts",
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5",
+        "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5",
+        "drive_c/Program Files/*/MQL5",
+        "drive_c/Program Files (x86)/*/MQL5",
     ]
-    return [path for path in _discover_dirs(patterns) if "Common" not in path.parts]
+    found = _discover_dirs(patterns, force_refresh=force_refresh)
+
+    # Some broker wrappers add one extra installation directory beneath
+    # Program Files. Search only the known Wine prefixes, not the whole Mac.
+    for prefix in _wine_prefixes(force_refresh=force_refresh):
+        for base in (
+            prefix / "drive_c" / "Program Files",
+            prefix / "drive_c" / "Program Files (x86)",
+        ):
+            if not base.is_dir():
+                continue
+            for candidate in _bounded_dirs(base, max_depth=4):
+                if candidate.name == "MQL5" and candidate not in found:
+                    found.append(candidate)
+    return found
+
+
+def find_experts_dirs(*, force_refresh: bool = False) -> list[Path]:
+    """Locate or derive installed MT5 MQL5/Experts directories."""
+
+    found: list[Path] = []
+    for mql5_dir in _find_mql5_dirs(force_refresh=force_refresh):
+        experts = mql5_dir / "Experts"
+        if experts not in found:
+            found.append(experts)
+    return found
 
 
 def install_bridge_source(source: str | Path) -> list[Path]:
-    """Copy the bridge source into every detected MT5 Experts directory."""
+    """Create FX2Active under Experts and copy the bridge source automatically."""
 
     source_path = Path(source)
     if not source_path.is_file():
         raise FileNotFoundError(f"Bridge source does not exist: {source_path}")
 
     installed: list[Path] = []
-    for experts_dir in find_experts_dirs():
+    experts_dirs = find_experts_dirs(force_refresh=True)
+    for experts_dir in experts_dirs:
         try:
             target_dir = experts_dir / BRIDGE_DIR_NAME
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -171,6 +336,14 @@ def find_snapshot_path() -> Path | None:
         candidates.append(common_dir / BRIDGE_DIR_NAME / SNAPSHOT_FILE)
 
     existing = [path for path in candidates if path.is_file()]
+    if not existing:
+        # MT5 may have been opened after FX2Active started. Refresh prefix
+        # discovery before giving up.
+        for common_dir in find_common_files_dirs(force_refresh=True):
+            candidate = common_dir / BRIDGE_DIR_NAME / SNAPSHOT_FILE
+            if candidate.is_file() and candidate not in existing:
+                existing.append(candidate)
+
     if not existing:
         return None
     return max(existing, key=lambda path: path.stat().st_mtime)
@@ -215,7 +388,7 @@ def write_requested_symbol(symbol: str) -> Path | None:
         target.write_text(symbol + "\n", encoding="utf-8")
         return target
 
-    for common_dir in find_common_files_dirs():
+    for common_dir in find_common_files_dirs(force_refresh=True):
         try:
             bridge_dir = common_dir / BRIDGE_DIR_NAME
             bridge_dir.mkdir(parents=True, exist_ok=True)
