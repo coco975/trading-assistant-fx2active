@@ -27,6 +27,7 @@ class RuntimeSettings:
     trading_enabled: bool = False
     allow_buys: bool = True
     allow_sells: bool = True
+    symbol: str = ""
     timeframe: str = "M15"
     fib_enabled: bool = True
     fib_retracement: float = 0.786
@@ -39,6 +40,8 @@ class RuntimeSettings:
     def __post_init__(self) -> None:
         if self.timeframe != "M15":
             raise ValueError("This test strategy is currently locked to M15")
+        if len(self.symbol) > 64:
+            raise ValueError("symbol is too long")
         if not 0 < self.fib_retracement < 1:
             raise ValueError("fib_retracement must be between 0 and 1")
         if self.stop_buffer_pips <= 0:
@@ -65,6 +68,8 @@ class RuntimeSettings:
             payload["entry_trigger"] = "directional_close"
         payload.setdefault("allow_buys", True)
         payload.setdefault("allow_sells", True)
+        payload.setdefault("symbol", "")
+        payload["symbol"] = str(payload["symbol"]).strip()
 
         return cls(**payload, poi=PoiSettings(**poi_data))
 
