@@ -5,11 +5,14 @@ A lightweight M15 Fibonacci-retracement trading bot test project with a working 
 ## Core strategy
 
 - Timeframe: M15
-- Direction currently implemented: LONG only
-- Fibonacci placement: bullish Swing Low -> Swing High
+- Directions: BUY and SELL
+- BUY Fibonacci placement: Swing Low -> Swing High
+- SELL Fibonacci placement: Swing High -> Swing Low
 - Default Fib entry: 78.6% retracement
-- Stop loss: 10 configurable pips below the 100% Fib / Swing Low
-- Take profit: retracement high / 0% Fib / Swing High
+- BUY stop loss: 10 configurable pips below the 100% Fib / Swing Low
+- SELL stop loss: 10 configurable pips above the 100% Fib / Swing High
+- BUY take profit: Swing High / 0% Fib
+- SELL take profit: Swing Low / 0% Fib
 - Maximum simultaneous positions: controlled from the web panel
 - POI/confluence rules: controlled from the web panel
 - Entry trigger: controlled from the web panel
@@ -21,14 +24,16 @@ The test dashboard is intentionally simpler than the main trading-assistant dash
 The panel can control:
 
 - Trading enabled / disabled
+- BUY trades enabled / disabled
+- SELL trades enabled / disabled
 - Fibonacci rule enabled / disabled
 - Fib retracement value (default 0.786)
 - Stop-loss buffer in pips
-- Take-profit mode (currently Swing High)
+- Take-profit mode: opposite swing target
 - Entry trigger:
   - First touch of the Fib zone
-  - Touch then close back above the Fib level
-  - Touch then bullish candle close
+  - Touch then close back in the trade direction
+  - Touch then directional candle close
 - Maximum open positions
 - POI/confluence toggles:
   - Support / resistance
@@ -38,7 +43,33 @@ The panel can control:
   - Candle confirmation
 - Minimum number of enabled POI confirmations required
 
-When **Done — Apply to Bot** is pressed, the settings API validates and atomically saves the new configuration. `WebControlledLongFibStrategy` reloads those settings on every evaluation, so the next entry check uses the new rules without restarting the strategy process.
+When **Done — Apply to Bot** is pressed, the settings API validates and atomically saves the new configuration. `WebControlledFibStrategy` reloads those settings on every evaluation, so the next entry check uses the new rules without restarting the strategy process.
+
+## Directional logic
+
+### BUY
+
+```text
+Bullish impulse
+Swing Low -> Swing High
+        ↓
+78.6% retracement entry
+        ↓
+SL = 10 pips below Swing Low / 100%
+TP = Swing High / 0%
+```
+
+### SELL
+
+```text
+Bearish impulse
+Swing High -> Swing Low
+        ↓
+78.6% retracement entry
+        ↓
+SL = 10 pips above Swing High / 100%
+TP = Swing Low / 0%
+```
 
 ## POI implementation
 
@@ -46,9 +77,9 @@ The current POI code turns common price-action/confluence concepts into determin
 
 - Support/resistance: repeated horizontal reactions close to the Fib entry
 - Previous swing: confirmed swing high/low close to the Fib entry
-- Trendline: projection through recent confirmed swing lows
+- Trendline: swing-low projection for BUY and swing-high projection for SELL
 - Psychological level: Fib entry close to a major round-number increment
-- Candle confirmation: the latest candle touches the entry and gives a bullish close back at/above it
+- Candle confirmation: bullish directional confirmation for BUY, bearish directional confirmation for SELL
 
 The toggles define which POI types are eligible. `Minimum confirmations` defines how many of the enabled POIs must actually be present before the setup passes.
 
@@ -65,15 +96,19 @@ Worker / strategy reloads settings
       ↓
 Trading enabled?
       ↓
+BUY / SELL side enabled?
+      ↓
 Position limit available?
+      ↓
+Most recent completed M15 impulse
       ↓
 78.6% Fib setup
       ↓
 Enabled POI checks
       ↓
-Selected entry trigger
+Selected directional entry trigger
       ↓
-Eligible trade setup
+Eligible BUY or SELL setup
 ```
 
 ## Price formulas
@@ -82,9 +117,18 @@ For a bullish impulse with Swing Low `L` and Swing High `H`:
 
 ```text
 range = H - L
-entry = H - (fib_retracement * range)
-stop_loss = L - (stop_buffer_pips * pip_size)
-take_profit = H
+BUY entry = H - (fib_retracement * range)
+BUY stop = L - (stop_buffer_pips * pip_size)
+BUY target = H
+```
+
+For a bearish impulse:
+
+```text
+range = H - L
+SELL entry = L + (fib_retracement * range)
+SELL stop = H + (stop_buffer_pips * pip_size)
+SELL target = L
 ```
 
 ## Swing convention
@@ -114,10 +158,10 @@ http://127.0.0.1:8080
 
 Vercel deployment is intentionally paused until the new Vercel account is ready. The interface and control architecture are already in the repository.
 
-The current local settings store uses a JSON file so the full control loop can be tested immediately. A Vercel deployment should use a persistent remote settings store because a serverless filesystem is not a reliable place to persist bot configuration. The `RuntimeSettingsStore` boundary is isolated so that storage can be swapped without rebuilding the strategy or dashboard.
+The current local settings store uses a JSON file so the full control loop can be tested immediately. A Vercel deployment should use a persistent remote settings store because a serverless filesystem is not a reliable place to persist bot configuration. The `RuntimeSettingsStore` boundary is isolated so storage can be swapped without rebuilding the strategy or dashboard.
 
 ## Important
 
 `pip_size` is configurable per instrument. Do not assume every symbol uses the same pip size.
 
-The repository does not send live broker orders yet. Broker/MT5 execution should be connected only after the exact FX2Active symbol, account/execution requirements, sizing rule, and short-side rules are supplied.
+The repository does not send live broker orders yet. Broker/MT5 execution should be connected only after the exact FX2Active symbol, account/execution requirements, and position-sizing rule are supplied.
