@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FX2Active Access</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="card login-card">
+      <p class="eyebrow">FX2Active</p>
+      <h1>Dashboard access</h1>
+      <p class="muted">Enter the temporary access PIN shown on the computer running FX2Active.</p>
+      <form id="login-form">
+        <label for="pin">Access PIN</label>
+        <input id="pin" name="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="12" required>
+        <button type="submit">Open Dashboard</button>
+      </form>
+      <p id="login-message" class="compact-note" role="status"></p>
+      <p class="compact-note">You only need to sign in once for this browser session. Closing the browser session, logging out, or restarting FX2Active ends the session.</p>
+    </section>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>
