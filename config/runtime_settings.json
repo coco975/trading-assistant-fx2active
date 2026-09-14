@@ -1,4 +1,6 @@
 {
+  "allow_buys": true,
+  "allow_sells": true,
   "entry_trigger": "touch",
   "fib_enabled": true,
   "fib_retracement": 0.786,
@@ -12,7 +14,7 @@
     "trendline": false
   },
   "stop_buffer_pips": 10.0,
-  "take_profit_mode": "swing_high",
+  "take_profit_mode": "swing_target",
   "timeframe": "M15",
   "trading_enabled": false
 }
