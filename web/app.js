@@ -1,6 +1,7 @@
 const ids = [
   'trading_enabled','allow_buys','allow_sells','symbol','fib_enabled','fib_retracement',
   'stop_buffer_pips','take_profit_mode','entry_trigger','max_open_positions',
+  'sizing_mode','risk_percent','fixed_lot','fixed_cash_risk','execution_mode',
   'support_resistance','previous_swing','trendline','psychological_level',
   'candle_confirmation','min_confirmations'
 ];
@@ -18,6 +19,20 @@ function setHealth(id, ok) {
   $(id).dataset.state = ok ? 'ok' : 'error';
 }
 
+function updateSizingFields() {
+  const mode = $('sizing_mode').value;
+  $('risk-percent-row').classList.toggle('hidden', mode !== 'risk_percent');
+  $('fixed-lot-row').classList.toggle('hidden', mode !== 'fixed_lot');
+  $('fixed-cash-row').classList.toggle('hidden', mode !== 'fixed_cash');
+}
+
+function updateExecutionHelp() {
+  const pending = $('execution_mode').value === 'pending_limit';
+  $('execution-help').innerHTML = pending
+    ? '<span>Pending limit</span><span>Entry price = 78.6% Fib</span>'
+    : '<span>Market mode</span><span>Uses the Entry confirmation above</span>';
+}
+
 function setForm(s) {
   $('trading_enabled').checked = s.trading_enabled;
   $('allow_buys').checked = s.allow_buys;
@@ -29,12 +44,19 @@ function setForm(s) {
   $('take_profit_mode').value = s.take_profit_mode;
   $('entry_trigger').value = s.entry_trigger;
   $('max_open_positions').value = s.max_open_positions;
+  $('sizing_mode').value = s.sizing_mode || 'risk_percent';
+  $('risk_percent').value = s.risk_percent ?? 1;
+  $('fixed_lot').value = s.fixed_lot ?? 0.01;
+  $('fixed_cash_risk').value = s.fixed_cash_risk ?? 10;
+  $('execution_mode').value = s.execution_mode || 'market_on_trigger';
   $('support_resistance').checked = s.poi.support_resistance;
   $('previous_swing').checked = s.poi.previous_swing;
   $('trendline').checked = s.poi.trendline;
   $('psychological_level').checked = s.poi.psychological_level;
   $('candle_confirmation').checked = s.poi.candle_confirmation;
   $('min_confirmations').value = s.poi.min_confirmations;
+  updateSizingFields();
+  updateExecutionHelp();
 }
 
 function getForm() {
@@ -50,6 +72,11 @@ function getForm() {
     take_profit_mode: $('take_profit_mode').value,
     entry_trigger: $('entry_trigger').value,
     max_open_positions: Number($('max_open_positions').value),
+    sizing_mode: $('sizing_mode').value,
+    risk_percent: Number($('risk_percent').value),
+    fixed_lot: Number($('fixed_lot').value),
+    fixed_cash_risk: Number($('fixed_cash_risk').value),
+    execution_mode: $('execution_mode').value,
     poi: {
       support_resistance: $('support_resistance').checked,
       previous_swing: $('previous_swing').checked,
@@ -167,6 +194,8 @@ async function apply() {
 }
 
 ids.forEach((id) => $(id).addEventListener('change', () => mark('Unsaved changes', 'busy')));
+$('sizing_mode').addEventListener('change', updateSizingFields);
+$('execution_mode').addEventListener('change', updateExecutionHelp);
 $('apply').addEventListener('click', apply);
 $('diagnose').addEventListener('click', diagnose);
 $('close-diagnostics').addEventListener('click', () => $('diagnostic-card').classList.add('hidden'));
