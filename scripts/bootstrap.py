@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess
 import sys
 from importlib import metadata
@@ -73,8 +74,16 @@ def main() -> int:
 
     from fx2active_bot.system_diagnostics import run_diagnostics
 
+    access_mode = os.environ.get("FX2ACTIVE_ACCESS_MODE", "local").strip().lower()
+    host = "0.0.0.0" if access_mode == "lan" else "127.0.0.1"
+
     settings_path = ROOT / "config" / "runtime_settings.json"
-    report = run_diagnostics(settings_path=settings_path, include_port_check=True)
+    report = run_diagnostics(
+        settings_path=settings_path,
+        host=host,
+        port=8080,
+        include_port_check=True,
+    )
     print("\n--- System diagnosis ---")
     for check in report["checks"]:
         marker = "OK" if check["ok"] else ("WARN" if check["level"] == "warning" else "ERROR")
@@ -86,7 +95,7 @@ def main() -> int:
         print("Then run START_FX2ACTIVE.bat again.")
         return 1
 
-    print("\n[OK] Diagnostics passed. Starting local worker + dashboard...")
+    print("\n[OK] Diagnostics passed. Starting worker + dashboard...")
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "run_fx2active.py")])
 
 
