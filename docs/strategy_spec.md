@@ -1,8 +1,25 @@
-# FX2Active Strategy Specification — v0.3
+# FX2Active Strategy Specification — v0.4
+
+## Runtime model
+
+This build is local-only. The same Windows PC runs:
+
+- MetaTrader 5
+- the FX2Active strategy worker
+- system diagnostics
+- the localhost web control panel
+
+The dashboard binds to `127.0.0.1:8080`; no Vercel or Cloudflare tunnel is required.
 
 ## Timeframe
 
 M15 only for this test build.
+
+## Trading symbol
+
+The exact broker symbol is set from the local web panel. Broker suffixes are supported, for example `EURUSD.a`.
+
+The worker validates/selects that symbol in MT5, reads M15 rates directly from the connected terminal, and derives the symbol pip size from MT5 metadata.
 
 ## Direction
 
@@ -55,8 +72,6 @@ The web panel defaults `fib_retracement` to `0.786` and `stop_buffer_pips` to `1
 - BUY: default 10 pips below the 100% Fib / Swing Low.
 - SELL: default 10 pips above the 100% Fib / Swing High.
 
-`pip_size` remains instrument configuration and is not globally hard-coded.
-
 ## Take profit
 
 - BUY: retracement Swing High / 0% Fib.
@@ -64,13 +79,14 @@ The web panel defaults `fib_retracement` to `0.786` and `stop_buffer_pips` to `1
 
 ## Web-controlled runtime rules
 
-The strategy reloads `config/runtime_settings.json` on each evaluation. The web panel can change the active rule set without restarting the bot.
+The strategy reloads `config/runtime_settings.json` while evaluating the market. Pressing **Done — Apply to Bot** changes the next strategy evaluation without restarting the process.
 
 Runtime controls include:
 
 - master trading enabled switch
 - BUY enabled switch
 - SELL enabled switch
+- exact MT5 symbol
 - Fibonacci rule enabled switch
 - Fibonacci retracement value
 - stop buffer in pips
@@ -85,7 +101,7 @@ The user can select one of three directional entry-trigger policies:
 
 ### `touch`
 
-The latest candle must trade through the calculated Fib entry.
+The latest M15 candle must trade through the calculated Fib entry.
 
 ### `close_back_in_direction`
 
@@ -107,16 +123,26 @@ The following categories can be enabled or disabled individually:
 - psychological round-number level
 - candle confirmation
 
-Enabled categories are candidate confirmations. `min_confirmations` controls how many of the enabled categories must actually be present before a setup passes.
+Enabled categories are candidate confirmations. `min_confirmations` controls how many enabled categories must actually be present before a setup passes.
 
-Directional confirmation is mirrored: bullish evidence is used for BUY setups and bearish evidence is used for SELL setups. Trendline logic uses swing lows for BUY and swing highs for SELL.
+Directional confirmation is mirrored: bullish evidence is used for BUY setups and bearish evidence for SELL setups. Trendline logic uses swing lows for BUY and swing highs for SELL.
 
 The current implementation uses deterministic test heuristics for each category. They are bot engineering definitions inspired by common technical-analysis concepts; they are not claimed to be proprietary BabyPips algorithms.
 
 ## Position limit
 
-Before evaluating a new entry, the worker compares the number of currently open positions with `max_open_positions`. If the limit is already reached, no new setup is returned.
+The local MT5 worker reads current account positions and compares their count with `max_open_positions`. If the configured limit is reached, a new setup is blocked.
 
-## Deployment status
+This conservative test implementation counts all open MT5 positions because a bot-specific magic-number execution layer has not been defined yet.
 
-The web interface is implemented in the repository but Vercel deployment is intentionally paused. Local persistence uses `config/runtime_settings.json`. Vercel deployment will require a persistent remote settings store so the web app and the trading worker share the same state reliably.
+## Diagnostics and startup
+
+`START_FX2ACTIVE.bat` is the normal entry point. It checks Python, prepares the local `.venv`, explains missing dependencies before asking permission to install them, verifies MT5/account readiness, starts the worker, starts the web server, and opens the browser.
+
+The dashboard can rerun the diagnosis with **Run system check**.
+
+## Execution status
+
+The worker currently performs live MT5 connectivity checks, reads live M15 candles, and evaluates qualifying BUY/SELL setups from the active website configuration.
+
+Live broker order submission is intentionally disabled until the final position-sizing rule and exact order-entry semantics are supplied.
