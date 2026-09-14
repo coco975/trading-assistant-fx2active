@@ -1,0 +1,17 @@
+FX2ACTIVE - QUICK START
+=======================
+
+1. Open the broker's MetaTrader 5 terminal and log in to the intended trading account.
+2. Double-click START_FX2ACTIVE.bat.
+3. On the first run, read each dependency explanation and choose Y only if you agree to install it.
+4. Wait for the system checks to complete.
+5. The local dashboard opens automatically at http://127.0.0.1:8080
+6. Set the exact MT5 Trading Symbol, choose the strategy rules, and press Done - Apply to Bot.
+7. Keep the FX2Active launcher window open while the system is running.
+8. Press Ctrl+C in that window when you want to stop it.
+
+No Vercel account, Cloudflare tunnel, web-control key, or public website is required.
+
+If startup shows an MT5 error, make sure MT5 is open, connected, logged in, AutoTrading is allowed, and external Python trading is not disabled.
+
+IMPORTANT: The current build evaluates live MT5 setups but does not submit live broker orders yet.
