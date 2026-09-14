@@ -23,19 +23,23 @@
     <section class="grid">
       <article class="card">
         <h2>Core Fibonacci Rule</h2>
-        <label class="switch-row"><span><strong>Use 78.6% Fibonacci</strong><small>Bullish swing low → swing high</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
+        <label class="switch-row"><span><strong>Use 78.6% Fibonacci</strong><small>BUY: swing low → high • SELL: swing high → low</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
+        <div class="toggle-grid">
+          <label class="toggle-card"><input id="allow_buys" type="checkbox"><span><strong>Allow BUY trades</strong><small>SL below swing low • TP swing high</small></span></label>
+          <label class="toggle-card"><input id="allow_sells" type="checkbox"><span><strong>Allow SELL trades</strong><small>SL above swing high • TP swing low</small></span></label>
+        </div>
         <div class="two-col">
           <label>Fib retracement<input id="fib_retracement" type="number" min="0.5" max="0.95" step="0.001"></label>
           <label>Stop buffer (pips)<input id="stop_buffer_pips" type="number" min="1" max="100" step="1"></label>
         </div>
-        <label>Take profit<select id="take_profit_mode"><option value="swing_high">Retracement swing high</option></select></label>
+        <label>Take profit<select id="take_profit_mode"><option value="swing_target">Opposite swing — high for BUY / low for SELL</option></select></label>
       </article>
 
       <article class="card">
         <h2>Entry Trigger</h2>
-        <label>Trigger type<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_above">Touch then close back above 78.6%</option><option value="bullish_close">Touch then bullish candle close</option></select></label>
+        <label>Trigger type<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in trade direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
         <label>Maximum open positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
-        <div class="locked"><span>M15 timeframe</span><span>Core test specification</span></div>
+        <div class="locked"><span>M15 timeframe</span><span>BUY + SELL capable</span></div>
       </article>
 
       <article class="card wide">
@@ -43,9 +47,9 @@
         <div class="toggle-grid">
           <label class="toggle-card"><input id="support_resistance" type="checkbox"><span><strong>Support / Resistance</strong><small>Horizontal reaction zone near entry</small></span></label>
           <label class="toggle-card"><input id="previous_swing" type="checkbox"><span><strong>Previous Swing</strong><small>Prior swing level overlaps the Fib zone</small></span></label>
-          <label class="toggle-card"><input id="trendline" type="checkbox"><span><strong>Trendline</strong><small>Dynamic structure confluence</small></span></label>
+          <label class="toggle-card"><input id="trendline" type="checkbox"><span><strong>Trendline</strong><small>Directional structure confluence</small></span></label>
           <label class="toggle-card"><input id="psychological_level" type="checkbox"><span><strong>Psychological Level</strong><small>Round-number price area</small></span></label>
-          <label class="toggle-card"><input id="candle_confirmation" type="checkbox"><span><strong>Candle Confirmation</strong><small>Price-action confirmation after retracement</small></span></label>
+          <label class="toggle-card"><input id="candle_confirmation" type="checkbox"><span><strong>Candle Confirmation</strong><small>Bullish for BUY • bearish for SELL</small></span></label>
         </div>
       </article>
     </section>
