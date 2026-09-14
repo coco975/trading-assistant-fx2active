@@ -28,8 +28,9 @@ function updateSizingFields() {
 
 function updateExecutionHelp() {
   const pending = $('execution_mode').value === 'pending_limit';
+  $('entry_trigger').disabled = pending;
   $('execution-help').innerHTML = pending
-    ? '<span>Pending limit</span><span>Entry price = 78.6% Fib</span>'
+    ? '<span>Pending limit</span><span>Order price = 78.6% Fib</span>'
     : '<span>Market mode</span><span>Uses the Entry confirmation above</span>';
 }
 
