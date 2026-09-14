@@ -4,8 +4,9 @@ import json
 import os
 import shutil
 import time
+from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 BRIDGE_DIR_NAME = "FX2Active"
 SNAPSHOT_FILE = "snapshot.json"
@@ -24,42 +25,83 @@ def _candidate_prefixes() -> list[Path]:
 
 
 def _search_roots() -> list[Path]:
-    """Return safe macOS roots that may contain MetaTrader/Wine data.
-
-    Broker-branded MT5 builds (for example Exness) do not always use the
-    standard MetaQuotes application-support folder name, so we also search the
-    normal Wine/container roots rather than depending on a broker name.
-    """
-
     home = Path.home()
     candidates = [
         home / "Library" / "Application Support",
         home / "Library" / "Containers",
         home / ".wine",
     ]
-    return [path for path in candidates if path.exists()]
+    return [path for path in candidates if path.is_dir()]
+
+
+def _bounded_dirs(root: Path, *, max_depth: int = 3) -> Iterator[Path]:
+    """Yield directories under root without recursively walking the whole Mac.
+
+    Broker-branded MT5 installations can use their own Application Support
+    folder. We only need to discover Wine prefixes, so a shallow scan is much
+    faster and avoids walking caches, browser data and unrelated containers.
+    """
+
+    root_depth = len(root.parts)
+    stack = [root]
+    seen: set[Path] = set()
+
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        yield current
+
+        depth = len(current.parts) - root_depth
+        if depth >= max_depth:
+            continue
+
+        try:
+            children = list(current.iterdir())
+        except (OSError, PermissionError):
+            continue
+
+        for child in children:
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    stack.append(child)
+            except (OSError, PermissionError):
+                continue
+
+
+@lru_cache(maxsize=1)
+def _wine_prefixes() -> tuple[Path, ...]:
+    """Find standard and broker-branded Wine prefixes quickly."""
+
+    found: list[Path] = []
+
+    for prefix in _candidate_prefixes():
+        if prefix.is_dir() and prefix not in found:
+            found.append(prefix)
+
+    for root in _search_roots():
+        # ~/.wine is itself normally the prefix.
+        if (root / "drive_c").is_dir() and root not in found:
+            found.append(root)
+
+        for candidate in _bounded_dirs(root, max_depth=3):
+            try:
+                if (candidate / "drive_c").is_dir() and candidate not in found:
+                    found.append(candidate)
+            except (OSError, PermissionError):
+                continue
+
+    return tuple(found)
 
 
 def _discover_dirs(patterns: list[str]) -> list[Path]:
     found: list[Path] = []
 
-    # Fast path for the standard MetaQuotes prefixes.
-    for prefix in _candidate_prefixes():
-        if not prefix.exists():
-            continue
+    for prefix in _wine_prefixes():
         for pattern in patterns:
-            for path in prefix.glob(pattern):
-                if path.is_dir() and path not in found:
-                    found.append(path)
-
-    # Broker-branded macOS installers can use an arbitrary application-support
-    # directory. Search only the normal application/Wine roots, not the whole
-    # home directory.
-    recursive_patterns = [f"**/{pattern}" for pattern in patterns]
-    for root in _search_roots():
-        for pattern in recursive_patterns:
             try:
-                matches = root.glob(pattern)
+                matches = prefix.glob(pattern)
                 for path in matches:
                     if path.is_dir() and path not in found:
                         found.append(path)
@@ -80,7 +122,7 @@ def find_common_files_dirs() -> list[Path]:
     patterns = [
         "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
         "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
-        "MetaQuotes/Terminal/Common/Files",
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files/",
     ]
     return _discover_dirs(patterns)
 
@@ -91,13 +133,8 @@ def find_experts_dirs() -> list[Path]:
     patterns = [
         "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
         "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5/Experts",
-        "MetaQuotes/Terminal/*/MQL5/Experts",
     ]
-    return [
-        path
-        for path in _discover_dirs(patterns)
-        if "Common" not in path.parts
-    ]
+    return [path for path in _discover_dirs(patterns) if "Common" not in path.parts]
 
 
 def install_bridge_source(source: str | Path) -> list[Path]:
