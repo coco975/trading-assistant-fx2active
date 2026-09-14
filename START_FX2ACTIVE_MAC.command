@@ -211,9 +211,9 @@ printf '\n[SETUP] Checking pip inside the FX2Active environment...\n'
   exit 1
 }
 
-printf '\n------------------------------------------------\n'
+printf '\n%s\n' '------------------------------------------------'
 printf 'Dashboard access\n'
-printf '------------------------------------------------\n'
+printf '%s\n' '------------------------------------------------'
 printf '[1] This Mac only\n'
 printf '[2] Devices on the same private Wi-Fi / LAN\n'
 read -r -p 'Choose 1 or 2: ' access_choice
