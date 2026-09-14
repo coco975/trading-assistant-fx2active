@@ -46,6 +46,7 @@
 
       <article class="card">
         <h2>Entry</h2>
+        <label>Trading symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. EURUSD or EURUSD.a" autocomplete="off"></label>
         <label>Trigger<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
         <label>Maximum open positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
         <div class="locked"><span>M15 timeframe</span><span>BUY + SELL</span></div>
