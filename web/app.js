@@ -14,6 +14,10 @@ function mark(message, kind='ok') {
   dot.dataset.kind = kind;
 }
 
+function setHealth(id, ok) {
+  $(id).dataset.state = ok ? 'ok' : 'error';
+}
+
 function setForm(s) {
   $('trading_enabled').checked = s.trading_enabled;
   $('allow_buys').checked = s.allow_buys;
@@ -55,14 +59,86 @@ function getForm() {
   };
 }
 
-async function load() {
+async function loadSettings() {
   try {
     const r = await fetch('/api/settings', {cache:'no-store'});
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     setForm(await r.json());
-    mark('Settings loaded from bot runtime');
+    mark('Settings loaded');
   } catch (e) {
     mark(`Could not load settings: ${e.message}`, 'error');
+  }
+}
+
+async function loadSystemStatus() {
+  try {
+    const r = await fetch('/api/system/status', {cache:'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const s = await r.json();
+
+    setHealth('worker-health', !!s.worker_online);
+    $('worker-text').textContent = s.worker_online ? 'Online' : 'Offline';
+
+    setHealth('mt5-health', !!s.mt5_connected);
+    $('mt5-text').textContent = s.mt5_connected ? 'Connected' : 'Not connected';
+
+    setHealth('account-health', !!s.account_connected);
+    $('account-text').textContent = s.account_connected
+      ? `${s.account_server || 'Logged in'} ${s.account_login_masked || ''}`.trim()
+      : 'Not logged in';
+
+    $('position-text').textContent = s.open_positions == null
+      ? '—'
+      : `${s.open_positions} / ${s.max_open_positions}`;
+    $('system-message').textContent = s.message || 'Local system running';
+  } catch (e) {
+    setHealth('worker-health', false);
+    setHealth('mt5-health', false);
+    setHealth('account-health', false);
+    $('worker-text').textContent = 'Unavailable';
+    $('mt5-text').textContent = 'Unavailable';
+    $('account-text').textContent = 'Unavailable';
+    $('system-message').textContent = `Status error: ${e.message}`;
+  }
+}
+
+function renderDiagnostics(report) {
+  const list = $('diagnostic-list');
+  list.innerHTML = '';
+  const checks = report.checks || [];
+  checks.forEach((check) => {
+    const row = document.createElement('div');
+    row.className = `diagnostic-row ${check.ok ? 'pass' : 'fail'}`;
+    const badge = document.createElement('span');
+    badge.className = 'diagnostic-badge';
+    badge.textContent = check.ok ? 'OK' : 'CHECK';
+    const copy = document.createElement('span');
+    const title = document.createElement('strong');
+    title.textContent = check.name;
+    const msg = document.createElement('small');
+    msg.textContent = check.message;
+    copy.append(title, msg);
+    row.append(badge, copy);
+    list.append(row);
+  });
+  $('diagnostic-card').classList.remove('hidden');
+}
+
+async function diagnose() {
+  const button = $('diagnose');
+  button.disabled = true;
+  button.textContent = 'Checking…';
+  try {
+    const r = await fetch('/api/system/diagnose', {method:'POST'});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    renderDiagnostics(data);
+    await loadSystemStatus();
+  } catch (e) {
+    mark(`System check failed: ${e.message}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Run system check';
   }
 }
 
@@ -79,7 +155,8 @@ async function apply() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     setForm(data.settings);
-    mark('Bot settings updated — worker will use these rules on the next evaluation');
+    mark('Applied — worker will use these rules on the next strategy check');
+    setTimeout(loadSystemStatus, 500);
   } catch (e) {
     mark(`Update failed: ${e.message}`, 'error');
   } finally {
@@ -89,4 +166,9 @@ async function apply() {
 
 ids.forEach((id) => $(id).addEventListener('change', () => mark('Unsaved changes', 'busy')));
 $('apply').addEventListener('click', apply);
-load();
+$('diagnose').addEventListener('click', diagnose);
+$('close-diagnostics').addEventListener('click', () => $('diagnostic-card').classList.add('hidden'));
+
+loadSettings();
+loadSystemStatus();
+setInterval(loadSystemStatus, 3000);
