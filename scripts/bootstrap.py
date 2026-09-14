@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import platform
 import subprocess
 import sys
 from importlib import metadata
@@ -35,7 +36,8 @@ def project_is_installed() -> bool:
 
 
 def ensure_python_packages() -> None:
-    mt5_missing = importlib.util.find_spec("MetaTrader5") is None
+    system = platform.system()
+    mt5_missing = system == "Windows" and importlib.util.find_spec("MetaTrader5") is None
     project_missing = not project_is_installed()
 
     if not mt5_missing and not project_missing:
@@ -50,8 +52,13 @@ def ensure_python_packages() -> None:
         )
     if mt5_missing:
         print(
-            "  - MetaTrader5: the Python bridge used to read MT5 prices, account "
-            "state and positions."
+            "  - MetaTrader5: the Windows Python bridge used to read MT5 prices, "
+            "account state and positions."
+        )
+    if system == "Darwin":
+        print(
+            "  - macOS uses the FX2Active MQL5 bridge inside MetaTrader instead of "
+            "the Windows-only MetaTrader5 Python IPC package."
         )
     print("\nInstallation is limited to this bot's .venv folder, not system-wide.")
     if not ask_yes_no("Prepare the bot's required Python packages now?"):
@@ -63,14 +70,39 @@ def ensure_python_packages() -> None:
     print("[OK] Python runtime prepared.")
 
 
+def prepare_macos_bridge() -> None:
+    if platform.system() != "Darwin":
+        return
+
+    from fx2active_bot.mac_bridge import find_snapshot_path, install_bridge_source
+
+    if find_snapshot_path() is not None:
+        print("[OK] macOS MT5 bridge data was detected.")
+        return
+
+    source = ROOT / "bridge" / "FX2ActiveBridge.mq5"
+    installed = install_bridge_source(source)
+    if installed:
+        print("\n[SETUP] FX2ActiveBridge.mq5 was copied into MetaTrader's Experts folder.")
+        print("One-time MetaTrader step:")
+        print("  1. Open MetaTrader 5 and MetaEditor.")
+        print("  2. In Experts > FX2Active, open FX2ActiveBridge.mq5 and press Compile.")
+        print("  3. Return to MT5, attach FX2ActiveBridge to one chart, and enable Algo Trading.")
+        print("  4. Leave that chart open, then run this launcher again.")
+    else:
+        print("\n[SETUP] MetaTrader's macOS data folder was not found yet.")
+        print("Install/open MetaTrader 5 once, then run FX2Active again so the bridge can be copied in.")
+
+
 def main() -> int:
     print("\n--- FX2Active first-run / startup checks ---")
     if sys.version_info < (3, 11):
         print(f"[ERROR] Python {sys.version.split()[0]} is too old. Python 3.11+ is required.")
-        print("Install Python 3.12, delete the .venv folder, then run START_FX2ACTIVE.bat again.")
+        print("Install Python 3.12+, delete the .venv folder, then run the FX2Active launcher again.")
         return 1
 
     ensure_python_packages()
+    prepare_macos_bridge()
 
     from fx2active_bot.system_diagnostics import run_diagnostics
 
@@ -91,8 +123,11 @@ def main() -> int:
 
     if not report["ready"]:
         print("\nThe bot is not ready to start yet.")
-        print("For MT5 errors: open the intended broker's MT5 terminal and log into the account.")
-        print("Then run START_FX2ACTIVE.bat again.")
+        if platform.system() == "Darwin":
+            print("For macOS MT5 bridge errors: keep MT5 open, compile/attach FX2ActiveBridge, and enable Algo Trading.")
+        else:
+            print("For MT5 errors: open the intended broker's MT5 terminal and log into the account.")
+        print("Then run the FX2Active launcher again.")
         return 1
 
     print("\n[OK] Diagnostics passed. Starting worker + dashboard...")
