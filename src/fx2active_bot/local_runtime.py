@@ -2,27 +2,29 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .controlled_strategy import WebControlledFibStrategy
+from .models import Candle
 from .runtime_settings import RuntimeSettingsStore
 from .system_diagnostics import run_diagnostics
 from .web_server import ControlPanelServer
 
 
 class LocalRuntimeMonitor:
-    """Keep a lightweight heartbeat/status file for the local dashboard.
+    """Local MT5 health monitor plus strategy evaluator.
 
-    This process verifies MT5 connectivity and reflects the current web-controlled
-    strategy state. It intentionally does not place live orders yet; execution
-    remains disabled until the exact symbol/sizing/order-entry rules are supplied.
+    It reads M15 candles from the connected MT5 terminal and evaluates the current
+    web-controlled BUY/SELL Fib strategy. Live order submission intentionally remains
+    disabled until position sizing and final execution semantics are specified.
     """
 
     def __init__(self, *, settings_path: str | Path, status_path: str | Path) -> None:
         self.store = RuntimeSettingsStore(settings_path)
+        self.settings_path = Path(settings_path)
         self.status_path = Path(status_path)
         self.stop_event = threading.Event()
 
@@ -32,6 +34,31 @@ class LocalRuntimeMonitor:
         tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         tmp.replace(self.status_path)
 
+    @staticmethod
+    def _pip_size(symbol_info: Any) -> float:
+        point = float(getattr(symbol_info, "point", 0.0) or 0.0)
+        digits = int(getattr(symbol_info, "digits", 0) or 0)
+        if point <= 0:
+            raise ValueError("MT5 returned an invalid point size for the symbol")
+        return point * 10 if digits in {3, 5} else point
+
+    @staticmethod
+    def _candles_from_rates(rates: Any) -> list[Candle]:
+        if rates is None:
+            return []
+        candles: list[Candle] = []
+        for row in rates:
+            candles.append(
+                Candle(
+                    timestamp=datetime.fromtimestamp(int(row["time"]), tz=timezone.utc),
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                )
+            )
+        return candles
+
     def _snapshot(self) -> dict[str, Any]:
         settings = self.store.load()
         payload: dict[str, Any] = {
@@ -40,42 +67,101 @@ class LocalRuntimeMonitor:
             "trading_enabled": settings.trading_enabled,
             "allow_buys": settings.allow_buys,
             "allow_sells": settings.allow_sells,
+            "symbol": settings.symbol,
             "max_open_positions": settings.max_open_positions,
             "mt5_connected": False,
             "account_connected": False,
             "open_positions": None,
-            "execution_mode": "strategy-control-only",
-            "message": "Worker running. Live order execution is not enabled yet.",
+            "position_limit_reached": False,
+            "strategy_evaluating": False,
+            "last_setup": None,
+            "execution_mode": "evaluation-only",
+            "message": "Worker is starting...",
         }
 
         try:
             import MetaTrader5 as mt5
 
             if not mt5.initialize():
-                payload["message"] = f"Worker running, but MT5 connection failed: {mt5.last_error()}"
+                payload["message"] = f"MT5 connection failed: {mt5.last_error()}"
                 return payload
 
-            terminal = mt5.terminal_info()
-            account = mt5.account_info()
-            payload["mt5_connected"] = bool(getattr(terminal, "connected", False)) if terminal else False
-            payload["account_connected"] = account is not None
-            if account is not None:
-                login = str(getattr(account, "login", ""))
-                payload["account_login_masked"] = (
-                    "*" * max(0, len(login) - 4) + login[-4:] if login else None
+            try:
+                terminal = mt5.terminal_info()
+                account = mt5.account_info()
+                payload["mt5_connected"] = bool(getattr(terminal, "connected", False)) if terminal else False
+                payload["account_connected"] = account is not None
+
+                if account is not None:
+                    login = str(getattr(account, "login", ""))
+                    payload["account_login_masked"] = (
+                        "*" * max(0, len(login) - 4) + login[-4:] if login else None
+                    )
+                    payload["account_server"] = getattr(account, "server", None)
+                    payload["trade_allowed"] = bool(getattr(account, "trade_allowed", True))
+
+                positions = mt5.positions_get()
+                payload["open_positions"] = len(positions) if positions is not None else 0
+                payload["position_limit_reached"] = (
+                    payload["open_positions"] >= settings.max_open_positions
                 )
-                payload["account_server"] = getattr(account, "server", None)
-                payload["trade_allowed"] = bool(getattr(account, "trade_allowed", True))
-            positions = mt5.positions_get()
-            payload["open_positions"] = len(positions) if positions is not None else 0
-            payload["position_limit_reached"] = (
-                payload["open_positions"] >= settings.max_open_positions
-            )
-            if payload["mt5_connected"] and payload["account_connected"]:
-                payload["message"] = "MT5 and strategy worker are online."
-            mt5.shutdown()
+
+                if not payload["mt5_connected"] or not payload["account_connected"]:
+                    payload["message"] = "MT5 is not fully connected/logged in."
+                    return payload
+
+                if not settings.symbol:
+                    payload["message"] = "MT5 is online. Set the Trading Symbol on the dashboard."
+                    return payload
+
+                symbol = settings.symbol
+                if not mt5.symbol_select(symbol, True):
+                    payload["message"] = f"MT5 symbol '{symbol}' was not found or could not be selected."
+                    return payload
+
+                info = mt5.symbol_info(symbol)
+                if info is None:
+                    payload["message"] = f"No MT5 information is available for '{symbol}'."
+                    return payload
+
+                pip_size = self._pip_size(info)
+                rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M15, 0, 300)
+                candles = self._candles_from_rates(rates)
+                if len(candles) < 20:
+                    payload["message"] = f"Waiting for enough M15 history for {symbol}."
+                    return payload
+
+                payload["strategy_evaluating"] = True
+                payload["pip_size"] = pip_size
+                payload["last_m15_bar"] = candles[-1].timestamp.isoformat()
+
+                strategy = WebControlledFibStrategy(self.settings_path, pip_size=pip_size)
+                setup = strategy.find_setup(
+                    candles,
+                    current_open_positions=int(payload["open_positions"] or 0),
+                )
+                if setup is not None:
+                    payload["last_setup"] = {
+                        "side": setup.side,
+                        "entry": setup.entry,
+                        "stop_loss": setup.stop_loss,
+                        "take_profit": setup.take_profit,
+                        "reward_to_risk": setup.reward_to_risk,
+                    }
+                    payload["message"] = (
+                        f"{symbol}: qualifying {setup.side} setup detected. "
+                        "Live order submission is still disabled."
+                    )
+                elif not settings.trading_enabled:
+                    payload["message"] = f"{symbol}: strategy worker online; trading is disabled."
+                elif payload["position_limit_reached"]:
+                    payload["message"] = f"{symbol}: position limit reached; no new setup is allowed."
+                else:
+                    payload["message"] = f"{symbol}: strategy worker online; no qualifying setup right now."
+            finally:
+                mt5.shutdown()
         except Exception as exc:
-            payload["message"] = f"Worker health check failed: {exc}"
+            payload["message"] = f"Worker health/strategy check failed: {exc}"
 
         return payload
 
