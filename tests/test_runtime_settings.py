@@ -1,3 +1,5 @@
+import pytest
+
 from fx2active_bot.runtime_settings import PoiSettings, RuntimeSettings, RuntimeSettingsStore
 from fx2active_bot.worker_control import WorkerControl
 
@@ -10,6 +12,9 @@ def test_round_trip(tmp_path):
         allow_buys=True,
         allow_sells=True,
         max_open_positions=3,
+        sizing_mode="risk_percent",
+        risk_percent=0.75,
+        execution_mode="pending_limit",
         poi=PoiSettings(min_confirmations=2),
     )
     store.save(expected)
@@ -39,3 +44,18 @@ def test_worker_respects_direction_switches(tmp_path):
     worker = WorkerControl(path, pip_size=0.0001)
     assert worker.can_open_position(0, side="BUY").allowed is False
     assert worker.can_open_position(0, side="SELL").allowed is True
+
+
+def test_sizing_mode_validation():
+    with pytest.raises(ValueError):
+        RuntimeSettings(sizing_mode="guess")
+
+
+def test_execution_mode_validation():
+    with pytest.raises(ValueError):
+        RuntimeSettings(execution_mode="instant_magic")
+
+
+def test_fixed_lot_must_be_positive():
+    with pytest.raises(ValueError):
+        RuntimeSettings(fixed_lot=0)
