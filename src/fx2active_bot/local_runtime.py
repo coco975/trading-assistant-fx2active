@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import threading
 import webbrowser
 from datetime import datetime, timezone
@@ -13,6 +15,36 @@ from .position_sizing import calculate_position_size
 from .runtime_settings import RuntimeSettingsStore
 from .system_diagnostics import run_diagnostics
 from .web_server import ControlPanelServer
+
+
+def detect_lan_ipv4() -> str | None:
+    """Best-effort detection of the PC's private IPv4 address."""
+
+    candidates: list[str] = []
+
+    # A UDP connect chooses the default IPv4 route without needing a successful
+    # connection or sending application data.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("192.0.2.1", 9))
+            candidates.append(sock.getsockname()[0])
+    except OSError:
+        pass
+
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            candidates.append(info[4][0])
+    except OSError:
+        pass
+
+    for candidate in candidates:
+        try:
+            ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if ip.version == 4 and ip.is_private and not ip.is_loopback:
+            return str(ip)
+    return None
 
 
 class LocalRuntimeMonitor:
@@ -219,11 +251,19 @@ class LocalRuntimeMonitor:
         self.stop_event.set()
 
 
-def run_local_system(root: str | Path, *, host: str = "127.0.0.1", port: int = 8080) -> None:
+def run_local_system(
+    root: str | Path,
+    *,
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    access_mode: str = "local",
+    dashboard_pin: str | None = None,
+) -> None:
     root = Path(root)
     settings_path = root / "config" / "runtime_settings.json"
     status_path = root / "data" / "runtime" / "system_status.json"
     diagnostics_path = root / "data" / "runtime" / "diagnostics.json"
+    lan_mode = access_mode == "lan"
 
     diagnostics = run_diagnostics(
         settings_path=settings_path,
@@ -238,16 +278,30 @@ def run_local_system(root: str | Path, *, host: str = "127.0.0.1", port: int = 8
     thread = threading.Thread(target=monitor.run, name="fx2active-runtime-monitor", daemon=True)
     thread.start()
 
-    url = f"http://{host}:{port}"
+    local_url = f"http://127.0.0.1:{port}"
+    lan_ip = detect_lan_ipv4() if lan_mode else None
+
     print("\n================================================")
-    print(" FX2Active is running locally")
+    print(" FX2Active is running")
     print("================================================")
-    print(f" Dashboard: {url}")
+    print(f" This PC: {local_url}")
+    if lan_mode:
+        if lan_ip:
+            print(f" Same Wi-Fi / LAN: http://{lan_ip}:{port}")
+        else:
+            print(" Same Wi-Fi / LAN: private IPv4 address could not be detected.")
+        print(" Username: fx2active")
+        print(f" Access PIN: {dashboard_pin or 'NOT SET'}")
+        print(" LAN mode accepts private-network clients only.")
+        print(" If Windows Firewall asks, allow Python on PRIVATE networks only.")
+        print(" Do not create router port forwarding for port 8080.")
+    else:
+        print(" Dashboard access: this PC only.")
     print(" Keep this window open while the bot is running.")
     print(" Press Ctrl+C to stop the local system.")
     print("================================================\n")
 
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    threading.Timer(1.0, lambda: webbrowser.open(local_url)).start()
 
     server = ControlPanelServer(
         settings_path=settings_path,
@@ -256,6 +310,8 @@ def run_local_system(root: str | Path, *, host: str = "127.0.0.1", port: int = 8
         web_root=root / "web",
         host=host,
         port=port,
+        dashboard_pin=dashboard_pin if lan_mode else None,
+        lan_only=lan_mode,
     )
     try:
         server.serve_forever()
