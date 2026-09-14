@@ -13,6 +13,13 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+FATAL_STARTUP_CHECKS = {
+    "Python",
+    "Operating system",
+    "Strategy settings",
+    "Local web port",
+}
+
 
 def ask_yes_no(question: str, *, default: bool = False) -> bool:
     suffix = "[Y/n]" if default else "[y/N]"
@@ -88,7 +95,7 @@ def prepare_macos_bridge() -> None:
         print("  1. Open MetaTrader 5 and MetaEditor.")
         print("  2. In Experts > FX2Active, open FX2ActiveBridge.mq5 and press Compile.")
         print("  3. Return to MT5, attach FX2ActiveBridge to one chart, and enable Algo Trading.")
-        print("  4. Leave that chart open, then run this launcher again.")
+        print("  4. Leave that chart open, then use Run system check in the dashboard.")
     else:
         print("\n[SETUP] MetaTrader's macOS data folder could not be detected automatically.")
         print("If MT5 is already open, use MT5 > File > Open Data Folder, then:")
@@ -97,7 +104,7 @@ def prepare_macos_bridge() -> None:
         print(f"  3. Copy this file into it: {source}")
         print("  4. Open MetaEditor, compile FX2ActiveBridge.mq5, attach it to one chart,")
         print("     enable Algo Trading, and leave the chart open.")
-        print("Then run the FX2Active launcher again.")
+        print("The dashboard will still open so you can see system status and retry checks.")
 
 
 def main() -> int:
@@ -127,16 +134,23 @@ def main() -> int:
         marker = "OK" if check["ok"] else ("WARN" if check["level"] == "warning" else "ERROR")
         print(f"[{marker}] {check['name']}: {check['message']}")
 
-    if not report["ready"]:
-        print("\nThe bot is not ready to start yet.")
-        if platform.system() == "Darwin":
-            print("For macOS MT5 bridge errors: keep MT5 open, compile/attach FX2ActiveBridge, and enable Algo Trading.")
-        else:
-            print("For MT5 errors: open the intended broker's MT5 terminal and log into the account.")
-        print("Then run the FX2Active launcher again.")
+    fatal_failures = [
+        check
+        for check in report["checks"]
+        if not check["ok"] and check["name"] in FATAL_STARTUP_CHECKS
+    ]
+    if fatal_failures:
+        print("\nFX2Active cannot start the dashboard until the startup problem above is fixed.")
         return 1
 
-    print("\n[OK] Diagnostics passed. Starting worker + dashboard...")
+    if not report["ready"]:
+        print("\n[WARN] The dashboard will start, but MT5 is not fully ready yet.")
+        if platform.system() == "Darwin":
+            print("Open/prepare FX2ActiveBridge in MT5, then use Run system check in the dashboard.")
+        else:
+            print("Open/connect MT5, then use Run system check in the dashboard.")
+
+    print("\n[OK] Starting FX2Active worker + dashboard...")
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "run_fx2active.py")])
 
 
