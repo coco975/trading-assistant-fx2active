@@ -22,27 +22,44 @@ if not defined PY_CMD (
   if %errorlevel%==0 set "PY_CMD=python"
 )
 
-if not defined PY_CMD (
-  echo [MISSING] Python 3 is not installed or is not on PATH.
-  echo Python runs the trading bot, diagnostics, MT5 connection and local website.
+if not defined PY_CMD goto :install_python
+
+%PY_CMD% -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" >nul 2>&1
+if errorlevel 1 (
+  echo [MISSING] The installed Python is older than 3.11.
+  echo Python 3.11 or newer is required by this bot.
   echo.
   choice /C YN /N /M "Install Python 3.12 using Windows Package Manager? [Y/N]: "
   if errorlevel 2 goto :no_python
-  where winget >nul 2>&1
-  if errorlevel 1 (
-    echo.
-    echo Windows Package Manager ^(winget^) is not available.
-    echo Install Python 3.12 manually from python.org, then run this file again.
-    pause
-    exit /b 1
-  )
-  winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
-  echo.
-  echo Python installation finished. Close this window and run START_FX2ACTIVE.bat again.
-  pause
-  exit /b 0
+  goto :winget_python
 )
 
+goto :python_ready
+
+:install_python
+ echo [MISSING] Python 3 is not installed or is not on PATH.
+ echo Python runs the trading bot, diagnostics, MT5 connection and local website.
+ echo.
+ choice /C YN /N /M "Install Python 3.12 using Windows Package Manager? [Y/N]: "
+ if errorlevel 2 goto :no_python
+ goto :winget_python
+
+:winget_python
+ where winget >nul 2>&1
+ if errorlevel 1 (
+   echo.
+   echo Windows Package Manager ^(winget^) is not available.
+   echo Install Python 3.12 manually from python.org, then run this file again.
+   pause
+   exit /b 1
+ )
+ winget install -e --id Python.Python.3.12 --accept-source-agreements --accept-package-agreements
+ echo.
+ echo Python installation finished. Close this window and run START_FX2ACTIVE.bat again.
+ pause
+ exit /b 0
+
+:python_ready
 if not exist ".venv\Scripts\python.exe" (
   echo [SETUP] The bot needs its own isolated Python environment.
   echo This keeps its packages separate from the rest of the PC and can be deleted safely.
