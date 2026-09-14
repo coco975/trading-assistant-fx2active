@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Sequence
 
-from .fibonacci import BullishFibLevels
+from .fibonacci import BearishFibLevels, BullishFibLevels
 from .models import Candle
 from .runtime_settings import PoiSettings
 from .swings import is_swing_high, is_swing_low
@@ -13,11 +13,17 @@ class PointOfInterestRule(Protocol):
     def confirms_long(self, candles: Sequence[Candle], levels: BullishFibLevels) -> bool:
         ...
 
+    def confirms_short(self, candles: Sequence[Candle], levels: BearishFibLevels) -> bool:
+        ...
+
 
 class AllowAllPOI:
     """Development-only placeholder."""
 
     def confirms_long(self, candles: Sequence[Candle], levels: BullishFibLevels) -> bool:
+        return True
+
+    def confirms_short(self, candles: Sequence[Candle], levels: BearishFibLevels) -> bool:
         return True
 
 
@@ -40,11 +46,7 @@ class POIEvidence:
 
 
 class ConfigurablePOIRule:
-    """Deterministic POI heuristics controlled by the web panel.
-
-    These are engineering definitions for the test bot, not proprietary BabyPips rules.
-    They translate common confluence concepts into checks the strategy can evaluate.
-    """
+    """Deterministic POI heuristics controlled by the web panel."""
 
     def __init__(
         self,
@@ -67,7 +69,11 @@ class ConfigurablePOIRule:
 
     def _support_resistance(self, candles: Sequence[Candle], entry: float) -> bool:
         sample = candles[-self.lookback:-1]
-        touches = sum(1 for candle in sample if self._near(candle.low, entry))
+        touches = sum(
+            1
+            for candle in sample
+            if self._near(candle.low, entry) or self._near(candle.high, entry)
+        )
         return touches >= 2
 
     def _previous_swing(self, candles: Sequence[Candle], entry: float) -> bool:
@@ -80,16 +86,26 @@ class ConfigurablePOIRule:
                 return True
         return False
 
-    def _trendline(self, candles: Sequence[Candle], entry: float) -> bool:
-        swing_lows = [
-            i
-            for i in range(2, max(2, len(candles) - 2))
-            if is_swing_low(candles, i)
-        ]
-        if len(swing_lows) < 2:
+    def _trendline(self, candles: Sequence[Candle], entry: float, side: str) -> bool:
+        if side == "BUY":
+            indices = [
+                i
+                for i in range(2, max(2, len(candles) - 2))
+                if is_swing_low(candles, i)
+            ]
+            price = lambda i: candles[i].low
+        else:
+            indices = [
+                i
+                for i in range(2, max(2, len(candles) - 2))
+                if is_swing_high(candles, i)
+            ]
+            price = lambda i: candles[i].high
+
+        if len(indices) < 2:
             return False
-        i1, i2 = swing_lows[-2], swing_lows[-1]
-        p1, p2 = candles[i1].low, candles[i2].low
+        i1, i2 = indices[-2], indices[-1]
+        p1, p2 = price(i1), price(i2)
         slope = (p2 - p1) / (i2 - i1)
         projected = p2 + slope * ((len(candles) - 1) - i2)
         return self._near(projected, entry)
@@ -99,25 +115,25 @@ class ConfigurablePOIRule:
         nearest = round(entry / major_step) * major_step
         return self._near(nearest, entry)
 
-    def _candle_confirmation(self, candles: Sequence[Candle], entry: float) -> bool:
+    def _candle_confirmation(self, candles: Sequence[Candle], entry: float, side: str) -> bool:
         if not candles:
             return False
         candle = candles[-1]
         touched = candle.low <= entry <= candle.high
-        return touched and candle.close > candle.open and candle.close >= entry
+        if side == "BUY":
+            return touched and candle.close > candle.open and candle.close >= entry
+        return touched and candle.close < candle.open and candle.close <= entry
 
-    def evidence(self, candles: Sequence[Candle], levels: BullishFibLevels) -> POIEvidence:
-        entry = levels.entry_78_6
+    def evidence(self, candles: Sequence[Candle], entry: float, side: str) -> POIEvidence:
         return POIEvidence(
             support_resistance=self._support_resistance(candles, entry),
             previous_swing=self._previous_swing(candles, entry),
-            trendline=self._trendline(candles, entry),
+            trendline=self._trendline(candles, entry, side),
             psychological_level=self._psychological_level(entry),
-            candle_confirmation=self._candle_confirmation(candles, entry),
+            candle_confirmation=self._candle_confirmation(candles, entry, side),
         )
 
-    def confirms_long(self, candles: Sequence[Candle], levels: BullishFibLevels) -> bool:
-        evidence = self.evidence(candles, levels)
+    def _confirms(self, evidence: POIEvidence) -> bool:
         self.last_evidence = evidence
         values = evidence.as_dict()
         enabled = {
@@ -133,3 +149,9 @@ class ConfigurablePOIRule:
             return True
         score = sum(1 for name in active_names if values[name])
         return score >= required
+
+    def confirms_long(self, candles: Sequence[Candle], levels: BullishFibLevels) -> bool:
+        return self._confirms(self.evidence(candles, levels.entry_78_6, "BUY"))
+
+    def confirms_short(self, candles: Sequence[Candle], levels: BearishFibLevels) -> bool:
+        return self._confirms(self.evidence(candles, levels.entry_78_6, "SELL"))
