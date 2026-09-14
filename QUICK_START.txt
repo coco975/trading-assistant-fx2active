@@ -4,8 +4,29 @@ FX2ACTIVE - QUICK START
 1. Open the broker's MetaTrader 5 terminal and log in to the intended trading account.
 2. Double-click START_FX2ACTIVE.bat.
 3. On the first run, read each dependency explanation and choose Y only if you agree to install it.
-4. Wait for the system checks to complete.
-5. The local dashboard opens automatically at http://127.0.0.1:8080
+4. Choose dashboard access:
+   [1] This PC only
+   [2] Devices on the same private Wi-Fi / LAN
+5. Wait for the system checks to complete.
+
+THIS PC ONLY
+------------
+The dashboard opens at:
+http://127.0.0.1:8080
+
+PRIVATE WI-FI / LAN MODE
+------------------------
+The launcher generates a temporary 6-digit PIN for that run and prints:
+- the exact private-network dashboard address, such as http://192.168.1.25:8080
+- Username: fx2active
+- Access PIN: the temporary 6-digit PIN
+
+Open that private-network address on a phone, iPad or another computer connected to the same private Wi-Fi/LAN. The browser will request the username and PIN.
+
+If Windows Firewall asks whether Python may communicate on the network, allow PRIVATE networks only. Do not enable Public networks and do not create router port forwarding for port 8080.
+
+TRADING SETTINGS
+----------------
 6. Set the exact MT5 Trading Symbol and choose the strategy rules.
 7. In Risk & Position Size, choose either Risk % of account equity, Fixed lot size, or Fixed cash risk.
 8. In Order Execution, choose either Market order after confirmation or Pending limit at the 78.6% Fib price.
@@ -13,7 +34,9 @@ FX2ACTIVE - QUICK START
 10. Keep the FX2Active launcher window open while the system is running.
 11. Press Ctrl+C in that window when you want to stop it.
 
-No Vercel account, Cloudflare tunnel, web-control key, or public website is required.
+No Vercel account, Cloudflare tunnel, web-control key, router port forwarding, or public website is required.
+
+LAN mode is for a trusted private network only. The server rejects non-private client IP addresses and requires the temporary dashboard PIN.
 
 If startup shows an MT5 error, make sure MT5 is open, connected, logged in, AutoTrading is allowed, and external Python trading is not disabled.
 
