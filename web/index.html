@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>FX2Active Trading Control</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">FX2ACTIVE • TEST CONTROL PANEL</p>
+        <h1>Trading Strategy Controls</h1>
+        <p class="muted">Configure what the worker is allowed to use before the next entry.</p>
+      </div>
+      <label class="master switch-row">
+        <span><strong>Trading enabled</strong><small>Master switch for new entries</small></span>
+        <input id="trading_enabled" type="checkbox"><span class="switch"></span>
+      </label>
+    </header>
+
+    <section class="grid">
+      <article class="card">
+        <h2>Core Fibonacci Rule</h2>
+        <label class="switch-row"><span><strong>Use 78.6% Fibonacci</strong><small>Bullish swing low → swing high</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
+        <div class="two-col">
+          <label>Fib retracement<input id="fib_retracement" type="number" min="0.5" max="0.95" step="0.001"></label>
+          <label>Stop buffer (pips)<input id="stop_buffer_pips" type="number" min="1" max="100" step="1"></label>
+        </div>
+        <label>Take profit<select id="take_profit_mode"><option value="swing_high">Retracement swing high</option></select></label>
+      </article>
+
+      <article class="card">
+        <h2>Entry Trigger</h2>
+        <label>Trigger type<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_above">Touch then close back above 78.6%</option><option value="bullish_close">Touch then bullish candle close</option></select></label>
+        <label>Maximum open positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
+        <div class="locked"><span>M15 timeframe</span><span>Core test specification</span></div>
+      </article>
+
+      <article class="card wide">
+        <div class="card-head"><div><h2>Points of Interest / Confluence</h2><p class="muted">Choose which confirmations the strategy can use around the Fib entry.</p></div><label>Minimum confirmations<input id="min_confirmations" type="number" min="0" max="5" step="1"></label></div>
+        <div class="toggle-grid">
+          <label class="toggle-card"><input id="support_resistance" type="checkbox"><span><strong>Support / Resistance</strong><small>Horizontal reaction zone near entry</small></span></label>
+          <label class="toggle-card"><input id="previous_swing" type="checkbox"><span><strong>Previous Swing</strong><small>Prior swing level overlaps the Fib zone</small></span></label>
+          <label class="toggle-card"><input id="trendline" type="checkbox"><span><strong>Trendline</strong><small>Dynamic structure confluence</small></span></label>
+          <label class="toggle-card"><input id="psychological_level" type="checkbox"><span><strong>Psychological Level</strong><small>Round-number price area</small></span></label>
+          <label class="toggle-card"><input id="candle_confirmation" type="checkbox"><span><strong>Candle Confirmation</strong><small>Price-action confirmation after retracement</small></span></label>
+        </div>
+      </article>
+    </section>
+
+    <footer class="action-bar">
+      <div><span id="status-dot" class="status-dot"></span><span id="status">Loading settings…</span></div>
+      <button id="apply" type="button">Done — Apply to Bot</button>
+    </footer>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
