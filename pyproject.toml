@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "trading-assistant-fx2active"
-version = "0.3.0"
-description = "Local M15 78.6% Fibonacci trading assistant and control panel for FX2Active"
+version = "0.4.0"
+description = "Cross-platform M15 78.6% Fibonacci trading assistant and local control panel for FX2Active"
 requires-python = ">=3.11"
 dependencies = [
   "MetaTrader5>=5.0.45; platform_system == 'Windows'",
