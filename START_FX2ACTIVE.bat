@@ -9,8 +9,8 @@ echo   FX2Active Trading Assistant - Local Launcher
 echo ================================================
 echo.
 echo This launcher checks the PC, prepares the bot, verifies MT5,
-echo starts the strategy worker and opens the local control website.
-echo Nothing is hosted on the public internet.
+echo starts the strategy worker and opens the control website.
+echo No router port forwarding or public hosting is used.
 echo.
 
 set "PY_CMD="
@@ -85,6 +85,41 @@ if not exist ".venv\Scripts\python.exe" (
   )
 )
 
+echo.
+echo ------------------------------------------------
+echo Dashboard access
+echo ------------------------------------------------
+echo [1] This PC only
+necho [2] Devices on the same private Wi-Fi / LAN
+choice /C 12 /N /M "Choose 1 or 2: "
+if errorlevel 2 goto :lan_access
+
+set "FX2ACTIVE_ACCESS_MODE=local"
+set "FX2ACTIVE_DASHBOARD_PIN="
+echo [OK] Dashboard will be available on this PC only.
+goto :start_bot
+
+:lan_access
+set "FX2ACTIVE_ACCESS_MODE=lan"
+set "FX2ACTIVE_DASHBOARD_PIN="
+for /f "delims=" %%P in ('%PY_CMD% -c "import secrets; print(secrets.randbelow(900000)+100000)"') do set "FX2ACTIVE_DASHBOARD_PIN=%%P"
+if not defined FX2ACTIVE_DASHBOARD_PIN (
+  echo [ERROR] Could not generate the private dashboard access PIN.
+  pause
+  exit /b 1
+)
+echo.
+echo [OK] Private Wi-Fi / LAN dashboard mode selected.
+echo A temporary 6-digit PIN will protect the dashboard for this run.
+echo Username: fx2active
+echo Access PIN: %FX2ACTIVE_DASHBOARD_PIN%
+echo.
+echo IMPORTANT: If Windows Firewall asks about Python network access,
+echo allow PRIVATE networks only. Do not enable router port forwarding.
+
+goto :start_bot
+
+:start_bot
 ".venv\Scripts\python.exe" scripts\bootstrap.py
 set "EXIT_CODE=%errorlevel%"
 
