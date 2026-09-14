@@ -9,17 +9,19 @@ from typing import Any
 
 from .controlled_strategy import WebControlledFibStrategy
 from .models import Candle
+from .position_sizing import calculate_position_size
 from .runtime_settings import RuntimeSettingsStore
 from .system_diagnostics import run_diagnostics
 from .web_server import ControlPanelServer
 
 
 class LocalRuntimeMonitor:
-    """Local MT5 health monitor plus strategy evaluator.
+    """Local MT5 health monitor plus web-controlled strategy evaluator.
 
-    It reads M15 candles from the connected MT5 terminal and evaluates the current
-    web-controlled BUY/SELL Fib strategy. Live order submission intentionally remains
-    disabled until position sizing and final execution semantics are specified.
+    The worker reads M15 candles from MT5, evaluates the selected BUY/SELL Fib
+    rules and calculates the planned position size from the account owner's web
+    settings. Live order submission remains disabled until the execution adapter
+    is explicitly enabled and tested.
     """
 
     def __init__(self, *, settings_path: str | Path, status_path: str | Path) -> None:
@@ -69,13 +71,15 @@ class LocalRuntimeMonitor:
             "allow_sells": settings.allow_sells,
             "symbol": settings.symbol,
             "max_open_positions": settings.max_open_positions,
+            "sizing_mode": settings.sizing_mode,
+            "configured_execution_mode": settings.execution_mode,
+            "live_execution_enabled": False,
             "mt5_connected": False,
             "account_connected": False,
             "open_positions": None,
             "position_limit_reached": False,
             "strategy_evaluating": False,
             "last_setup": None,
-            "execution_mode": "evaluation-only",
             "message": "Worker is starting...",
         }
 
@@ -98,6 +102,9 @@ class LocalRuntimeMonitor:
                         "*" * max(0, len(login) - 4) + login[-4:] if login else None
                     )
                     payload["account_server"] = getattr(account, "server", None)
+                    payload["account_currency"] = getattr(account, "currency", None)
+                    payload["account_balance"] = float(getattr(account, "balance", 0.0) or 0.0)
+                    payload["account_equity"] = float(getattr(account, "equity", 0.0) or 0.0)
                     payload["trade_allowed"] = bool(getattr(account, "trade_allowed", True))
 
                 positions = mt5.positions_get()
@@ -141,16 +148,44 @@ class LocalRuntimeMonitor:
                     current_open_positions=int(payload["open_positions"] or 0),
                 )
                 if setup is not None:
+                    loss_per_one_lot: float | None = None
+                    if settings.sizing_mode != "fixed_lot":
+                        order_type = (
+                            mt5.ORDER_TYPE_BUY if setup.side == "BUY" else mt5.ORDER_TYPE_SELL
+                        )
+                        calculated = mt5.order_calc_profit(
+                            order_type,
+                            symbol,
+                            1.0,
+                            float(setup.entry),
+                            float(setup.stop_loss),
+                        )
+                        if calculated is not None:
+                            loss_per_one_lot = abs(float(calculated))
+
+                    planned_size = calculate_position_size(
+                        settings,
+                        account_equity=float(payload.get("account_equity") or 0.0),
+                        loss_per_one_lot=loss_per_one_lot,
+                        volume_min=float(getattr(info, "volume_min", 0.0) or 0.0),
+                        volume_max=float(getattr(info, "volume_max", 0.0) or 0.0),
+                        volume_step=float(getattr(info, "volume_step", 0.0) or 0.0),
+                    )
+
                     payload["last_setup"] = {
                         "side": setup.side,
                         "entry": setup.entry,
                         "stop_loss": setup.stop_loss,
                         "take_profit": setup.take_profit,
                         "reward_to_risk": setup.reward_to_risk,
+                        "planned_volume": planned_size.volume,
+                        "planned_risk_amount": planned_size.risk_amount,
+                        "sizing_mode": planned_size.mode,
+                        "execution_mode": settings.execution_mode,
                     }
                     payload["message"] = (
-                        f"{symbol}: qualifying {setup.side} setup detected. "
-                        "Live order submission is still disabled."
+                        f"{symbol}: qualifying {setup.side} setup detected; planned volume "
+                        f"{planned_size.volume:g} lot(s). Live order submission is disabled."
                     )
                 elif not settings.trading_enabled:
                     payload["message"] = f"{symbol}: strategy worker online; trading is disabled."
