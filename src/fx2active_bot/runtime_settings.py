@@ -25,11 +25,13 @@ class PoiSettings:
 @dataclass(frozen=True)
 class RuntimeSettings:
     trading_enabled: bool = False
+    allow_buys: bool = True
+    allow_sells: bool = True
     timeframe: str = "M15"
     fib_enabled: bool = True
     fib_retracement: float = 0.786
     stop_buffer_pips: float = 10.0
-    take_profit_mode: str = "swing_high"
+    take_profit_mode: str = "swing_target"
     entry_trigger: str = "touch"
     max_open_positions: int = 1
     poi: PoiSettings = field(default_factory=PoiSettings)
@@ -41,19 +43,30 @@ class RuntimeSettings:
             raise ValueError("fib_retracement must be between 0 and 1")
         if self.stop_buffer_pips <= 0:
             raise ValueError("stop_buffer_pips must be positive")
-        if self.take_profit_mode != "swing_high":
-            raise ValueError("take_profit_mode must be swing_high")
-        if self.entry_trigger not in {"touch", "close_back_above", "bullish_close"}:
+        if self.take_profit_mode != "swing_target":
+            raise ValueError("take_profit_mode must be swing_target")
+        if self.entry_trigger not in {"touch", "close_back_in_direction", "directional_close"}:
             raise ValueError("unsupported entry_trigger")
         if not 1 <= self.max_open_positions <= 20:
             raise ValueError("max_open_positions must be between 1 and 20")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
-        poi_data = data.get("poi", {})
-        poi = PoiSettings(**poi_data)
-        payload = {k: v for k, v in data.items() if k != "poi"}
-        return cls(**payload, poi=poi)
+        payload = dict(data)
+        poi_data = payload.pop("poi", {})
+
+        # Backward compatibility with the first long-only dashboard settings.
+        if payload.get("take_profit_mode") == "swing_high":
+            payload["take_profit_mode"] = "swing_target"
+        old_trigger = payload.get("entry_trigger")
+        if old_trigger == "close_back_above":
+            payload["entry_trigger"] = "close_back_in_direction"
+        elif old_trigger == "bullish_close":
+            payload["entry_trigger"] = "directional_close"
+        payload.setdefault("allow_buys", True)
+        payload.setdefault("allow_sells", True)
+
+        return cls(**payload, poi=PoiSettings(**poi_data))
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
