@@ -26,9 +26,22 @@ def is_swing_low(candles: Sequence[Candle], index: int, *, left: int = 2, right:
 def latest_bullish_swing_pair(
     candles: Sequence[Candle], *, left: int = 2, right: int = 2
 ) -> tuple[int, int] | None:
+    """Return latest confirmed (swing_low_index, swing_high_index)."""
     lows = [i for i in range(len(candles)) if is_swing_low(candles, i, left=left, right=right)]
     highs = [i for i in range(len(candles)) if is_swing_high(candles, i, left=left, right=right)]
     candidates = [(lo, hi) for lo in lows for hi in highs if lo < hi]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda pair: pair[1])
+
+
+def latest_bearish_swing_pair(
+    candles: Sequence[Candle], *, left: int = 2, right: int = 2
+) -> tuple[int, int] | None:
+    """Return latest confirmed (swing_high_index, swing_low_index)."""
+    highs = [i for i in range(len(candles)) if is_swing_high(candles, i, left=left, right=right)]
+    lows = [i for i in range(len(candles)) if is_swing_low(candles, i, left=left, right=right)]
+    candidates = [(hi, lo) for hi in highs for lo in lows if hi < lo]
     if not candidates:
         return None
     return max(candidates, key=lambda pair: pair[1])
