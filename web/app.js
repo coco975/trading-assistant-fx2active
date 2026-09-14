@@ -1,5 +1,5 @@
 const ids = [
-  'trading_enabled','allow_buys','allow_sells','fib_enabled','fib_retracement',
+  'trading_enabled','allow_buys','allow_sells','symbol','fib_enabled','fib_retracement',
   'stop_buffer_pips','take_profit_mode','entry_trigger','max_open_positions',
   'support_resistance','previous_swing','trendline','psychological_level',
   'candle_confirmation','min_confirmations'
@@ -22,6 +22,7 @@ function setForm(s) {
   $('trading_enabled').checked = s.trading_enabled;
   $('allow_buys').checked = s.allow_buys;
   $('allow_sells').checked = s.allow_sells;
+  $('symbol').value = s.symbol || '';
   $('fib_enabled').checked = s.fib_enabled;
   $('fib_retracement').value = s.fib_retracement;
   $('stop_buffer_pips').value = s.stop_buffer_pips;
@@ -41,6 +42,7 @@ function getForm() {
     trading_enabled: $('trading_enabled').checked,
     allow_buys: $('allow_buys').checked,
     allow_sells: $('allow_sells').checked,
+    symbol: $('symbol').value.trim(),
     timeframe: 'M15',
     fib_enabled: $('fib_enabled').checked,
     fib_retracement: Number($('fib_retracement').value),
