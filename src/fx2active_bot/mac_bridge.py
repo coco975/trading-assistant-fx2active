@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,44 @@ def find_common_files_dirs() -> list[Path]:
                 if path.is_dir() and path not in found:
                     found.append(path)
     return found
+
+
+def find_experts_dirs() -> list[Path]:
+    """Locate installed MT5 MQL5/Experts directories inside the Wine prefix."""
+
+    found: list[Path] = []
+    patterns = [
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5/Experts",
+        "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5/Experts",
+    ]
+    for prefix in _candidate_prefixes():
+        if not prefix.exists():
+            continue
+        for pattern in patterns:
+            for path in prefix.glob(pattern):
+                if path.is_dir() and "Common" not in path.parts and path not in found:
+                    found.append(path)
+    return found
+
+
+def install_bridge_source(source: str | Path) -> list[Path]:
+    """Copy the bridge source into every detected MT5 Experts directory."""
+
+    source_path = Path(source)
+    if not source_path.is_file():
+        raise FileNotFoundError(f"Bridge source does not exist: {source_path}")
+
+    installed: list[Path] = []
+    for experts_dir in find_experts_dirs():
+        try:
+            target_dir = experts_dir / BRIDGE_DIR_NAME
+            target_dir.mkdir(parents=True, exist_ok=True)
+            target = target_dir / source_path.name
+            shutil.copy2(source_path, target)
+            installed.append(target)
+        except OSError:
+            continue
+    return installed
 
 
 def find_snapshot_path() -> Path | None:
