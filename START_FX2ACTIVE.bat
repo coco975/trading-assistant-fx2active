@@ -110,9 +110,8 @@ if not defined FX2ACTIVE_DASHBOARD_PIN (
 )
 echo.
 echo [OK] Private Wi-Fi / LAN dashboard mode selected.
-echo A temporary 6-digit PIN will protect the dashboard for this run.
-echo Username: fx2active
-echo Access PIN: %FX2ACTIVE_DASHBOARD_PIN%
+echo Temporary access PIN: %FX2ACTIVE_DASHBOARD_PIN%
+echo Enter this PIN once on the other device; it remains signed in for that browser session.
 echo.
 echo IMPORTANT: If Windows Firewall asks about Python network access,
 echo allow PRIVATE networks only. Do not enable router port forwarding.
