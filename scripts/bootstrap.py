@@ -68,6 +68,28 @@ def ensure_python_packages() -> None:
     print("[OK] MetaTrader5 Python bridge installed.")
 
 
+def verify_runtime_imports() -> bool:
+    """Catch a damaged/incomplete execution install before spawning the worker."""
+
+    modules = (
+        "fx2active_bot.runtime_settings",
+        "fx2active_bot.trade_executor",
+        "fx2active_bot.mac_bridge",
+        "fx2active_bot.mac_trade_executor",
+        "fx2active_bot.execution_runtime",
+        "fx2active_bot.web_server",
+    )
+    try:
+        for module_name in modules:
+            importlib.import_module(module_name)
+    except Exception as exc:
+        print(f"[ERROR] FX2Active runtime import check failed: {exc}")
+        print("Run git pull again. If this persists, rebuild the .venv with the launcher.")
+        return False
+    print("[OK] FX2Active strategy, dashboard and execution modules import correctly.")
+    return True
+
+
 def prepare_macos_bridge() -> None:
     if platform.system() != "Darwin":
         return
@@ -138,6 +160,9 @@ def main() -> int:
         return 1
     except (OSError, RuntimeError) as exc:
         print(f"[ERROR] Python package setup could not complete: {exc}")
+        return 1
+
+    if not verify_runtime_imports():
         return 1
 
     prepare_macos_bridge()
