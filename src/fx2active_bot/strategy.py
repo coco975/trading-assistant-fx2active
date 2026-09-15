@@ -18,6 +18,8 @@ class TradeSetup:
     swing_low: float
     swing_high: float
     reward_to_risk: float
+    swing_low_time: str | None = None
+    swing_high_time: str | None = None
 
 
 def _build_long(
@@ -45,6 +47,8 @@ def _build_long(
         swing_low=levels.swing_low,
         swing_high=levels.swing_high,
         reward_to_risk=levels.reward_to_risk,
+        swing_low_time=candles[low_index].timestamp.isoformat(),
+        swing_high_time=candles[high_index].timestamp.isoformat(),
     )
 
 
@@ -73,6 +77,8 @@ def _build_short(
         swing_low=levels.swing_low,
         swing_high=levels.swing_high,
         reward_to_risk=levels.reward_to_risk,
+        swing_low_time=candles[low_index].timestamp.isoformat(),
+        swing_high_time=candles[high_index].timestamp.isoformat(),
     )
 
 
