@@ -35,6 +35,7 @@ def _candidate_prefixes() -> list[Path]:
     app_support = home / "Library" / "Application Support"
     return [
         app_support / "net.metaquotes.wine.metatrader5",
+        app_support / "MetaTrader 5" / "Bottles" / "metatrader5",
         app_support / "MetaTrader 5",
         app_support / "Metatrader 5",
         app_support / "MetaTrader5",
@@ -283,15 +284,42 @@ def find_common_files_dirs(*, force_refresh: bool = False) -> list[Path]:
         return [path.parent if path.name == BRIDGE_DIR_NAME else path]
 
     found: list[Path] = []
+    direct = _discover_dirs(
+        [
+            "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
+            "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
+        ],
+        force_refresh=force_refresh,
+    )
+    for path in direct:
+        if path not in found:
+            found.append(path)
+
     for terminal_root in _terminal_roots(force_refresh=force_refresh):
         common_files = terminal_root / "Common" / "Files"
-        if common_files not in found:
+        if common_files.is_dir() and common_files not in found:
             found.append(common_files)
     return found
 
 
 def _find_mql5_dirs(*, force_refresh: bool = False) -> list[Path]:
+    """Find MT5 data folders used by both modern and older macOS Wine packages."""
+
     found: list[Path] = []
+
+    # Current MetaQuotes macOS packages commonly keep MQL5 next to terminal64.exe
+    # under drive_c/Program Files. Older packages may keep it under the hashed
+    # AppData/MetaQuotes/Terminal data folder. Broker-branded Wine prefixes can
+    # use either layout.
+    direct_patterns = [
+        "drive_c/Program Files/*/MQL5",
+        "drive_c/Program Files (x86)/*/MQL5",
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5",
+        "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5",
+    ]
+    for path in _discover_dirs(direct_patterns, force_refresh=force_refresh):
+        if path not in found:
+            found.append(path)
 
     for terminal_root in _terminal_roots(force_refresh=force_refresh):
         try:
