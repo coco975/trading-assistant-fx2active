@@ -31,8 +31,9 @@ class ExecutionResult:
 class ExecutionStateStore:
     """Persistent duplicate guard for broker submissions.
 
-    A setup is recorded once MT5 accepts it, or when a send result is ambiguous.
-    This deliberately favors missing a retry over accidentally duplicating a trade.
+    A setup is recorded once MT5 accepts it, definitively rejects an OrderSend,
+    or when the send result is ambiguous. This deliberately favors missing a
+    retry over accidentally duplicating a broker order.
     """
 
     def __init__(self, path: str | Path) -> None:
@@ -57,7 +58,6 @@ class ExecutionStateStore:
         processed = payload["processed"]
         processed[fingerprint] = result.to_dict()
 
-        # Bound the file size while preserving the newest insertion order.
         if len(processed) > 500:
             for key in list(processed)[: len(processed) - 500]:
                 processed.pop(key, None)
@@ -137,7 +137,6 @@ def _filling_candidates(mt5: Any, info: Any, *, pending: bool) -> list[int]:
     if execution_mode != market_execution:
         candidates.append(int(getattr(mt5, "ORDER_FILLING_RETURN", 2)))
 
-    # Some brokers expose incomplete flags. Keep one conservative fallback.
     if not candidates:
         candidates.append(int(getattr(mt5, "ORDER_FILLING_IOC", 1)))
 
@@ -153,8 +152,6 @@ def _successful_send_retcodes(mt5: Any) -> set[int]:
 
 
 def _safe_retry_retcodes(mt5: Any) -> set[int]:
-    # These indicate that the requested price was not executed. Connection/time-out
-    # failures are intentionally excluded because their fill state can be ambiguous.
     return {
         int(getattr(mt5, "TRADE_RETCODE_REQUOTE", 10004)),
         int(getattr(mt5, "TRADE_RETCODE_PRICE_CHANGED", 10020)),
@@ -164,6 +161,19 @@ def _safe_retry_retcodes(mt5: Any) -> set[int]:
 
 def _result_message(result: Any) -> str:
     return str(getattr(result, "comment", "") or "MT5 rejected the trade request")
+
+
+def _terminal_ready(mt5: Any) -> tuple[bool, str]:
+    terminal = mt5.terminal_info()
+    if terminal is None:
+        return False, "MT5 terminal information is unavailable."
+    if not bool(getattr(terminal, "connected", False)):
+        return False, "MT5 terminal is not connected."
+    if not bool(getattr(terminal, "trade_allowed", False)):
+        return False, "MT5 AutoTrading is disabled."
+    if bool(getattr(terminal, "tradeapi_disabled", False)):
+        return False, "MT5 is blocking external Python trading access."
+    return True, "MT5 terminal trading access is ready."
 
 
 class WindowsTradeExecutor:
@@ -198,6 +208,10 @@ class WindowsTradeExecutor:
                 "This FX2Active setup was already submitted; duplicate order blocked.",
                 fingerprint,
             )
+
+        terminal_ok, terminal_message = _terminal_ready(mt5)
+        if not terminal_ok:
+            return ExecutionResult(False, "blocked", terminal_message, fingerprint)
 
         is_real = _account_is_real(mt5, account)
         if is_real is None and not settings.allow_live_account:
@@ -255,9 +269,7 @@ class WindowsTradeExecutor:
             return ExecutionResult(False, "error", "Broker returned invalid point size.", fingerprint)
 
         if pending:
-            order_type = (
-                mt5.ORDER_TYPE_BUY_LIMIT if side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
-            )
+            order_type = mt5.ORDER_TYPE_BUY_LIMIT if side == "BUY" else mt5.ORDER_TYPE_SELL_LIMIT
             price = _normalize_price(float(setup.entry), digits)
             if side == "BUY" and price >= ask:
                 return ExecutionResult(
@@ -363,14 +375,18 @@ class WindowsTradeExecutor:
                     f"MT5 order_send returned no result: {mt5.last_error()}. Duplicate retry blocked.",
                     fingerprint,
                     volume=float(volume),
-                    price=price,
+                    price=float(request["price"]),
                 )
                 self.state.record(fingerprint, ambiguous)
                 return ambiguous
 
             retcode = int(getattr(result, "retcode", -1))
             if retcode in _successful_send_retcodes(mt5):
-                status = "placed" if retcode == int(getattr(mt5, "TRADE_RETCODE_PLACED", 10008)) else "filled"
+                status = (
+                    "placed"
+                    if retcode == int(getattr(mt5, "TRADE_RETCODE_PLACED", 10008))
+                    else "filled"
+                )
                 if retcode == int(getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)):
                     status = "partial"
                 accepted = ExecutionResult(
@@ -382,7 +398,7 @@ class WindowsTradeExecutor:
                     order_ticket=int(getattr(result, "order", 0) or 0) or None,
                     deal_ticket=int(getattr(result, "deal", 0) or 0) or None,
                     volume=float(getattr(result, "volume", volume) or volume),
-                    price=float(getattr(result, "price", price) or price),
+                    price=float(getattr(result, "price", request["price"]) or request["price"]),
                 )
                 self.state.record(fingerprint, accepted)
                 return accepted
@@ -397,7 +413,7 @@ class WindowsTradeExecutor:
                     if checked is not None and int(getattr(checked, "retcode", -1)) == 0:
                         continue
 
-            return ExecutionResult(
+            rejected = ExecutionResult(
                 False,
                 "rejected",
                 f"MT5 rejected the order: {_result_message(result)}",
@@ -408,3 +424,5 @@ class WindowsTradeExecutor:
                 volume=float(getattr(result, "volume", 0.0) or 0.0) or None,
                 price=float(getattr(result, "price", 0.0) or 0.0) or None,
             )
+            self.state.record(fingerprint, rejected)
+            return rejected
