@@ -31,8 +31,8 @@ function updateExecutionHelp() {
   const pending = $('execution_mode').value === 'pending_limit';
   $('entry_trigger').disabled = pending;
   $('execution-help').innerHTML = pending
-    ? '<span>Pending limit</span><span>Places the order at the 78.6% Fib price</span>'
-    : '<span>Market mode</span><span>Uses the Entry confirmation above</span>';
+    ? '<span>Pending Limit</span><span>Entry placed at the 78.6% Fib level</span>'
+    : '<span>Market Execution</span><span>Uses the selected entry confirmation</span>';
 }
 
 function setForm(s) {
@@ -133,7 +133,7 @@ async function loadSystemStatus() {
       $('position-text').textContent = `${s.open_positions} position(s) + ${pending} pending / ${s.max_open_positions}`;
     }
 
-    let message = s.message || 'Local system running';
+    let message = s.message || 'FX2Active running';
     if (s.execution_result?.order_ticket) {
       message += ` Order #${s.execution_result.order_ticket}`;
     } else if (s.execution_result?.deal_ticket) {
@@ -187,7 +187,7 @@ async function diagnose() {
     mark(`System check failed: ${e.message}`, 'error');
   } finally {
     button.disabled = false;
-    button.textContent = 'Run system check';
+    button.textContent = 'System Check';
   }
 }
 
@@ -204,7 +204,7 @@ async function apply() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     setForm(data.settings);
-    mark('Applied — worker will use these rules on the next strategy check');
+    mark('Settings applied');
     setTimeout(loadSystemStatus, 500);
   } catch (e) {
     mark(`Update failed: ${e.message}`, 'error');
