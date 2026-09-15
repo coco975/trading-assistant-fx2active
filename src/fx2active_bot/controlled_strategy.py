@@ -46,6 +46,11 @@ class WebControlledFibStrategy:
         if setup is None or not candles:
             return None
 
+        # A pending limit is intentionally placed at the Fib price before a market
+        # touch. Market mode still waits for the selected confirmation trigger.
+        if settings.execution_mode == "pending_limit":
+            return setup
+
         last = candles[-1]
         touched = last.low <= setup.entry <= last.high
         if settings.entry_trigger == "touch":
