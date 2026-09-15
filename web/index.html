@@ -15,7 +15,7 @@
         <p class="muted">The worker uses these settings on the next strategy check.</p>
       </div>
       <label class="master switch-row">
-        <span><strong>Trading enabled</strong><small>Master switch for new entries</small></span>
+        <span><strong>Trading enabled</strong><small>Master switch for new setups</small></span>
         <input id="trading_enabled" type="checkbox"><span class="switch"></span>
       </label>
     </header>
@@ -24,7 +24,7 @@
       <div class="health-item"><span id="worker-health" class="health-light"></span><span><strong>Worker</strong><small id="worker-text">Checking…</small></span></div>
       <div class="health-item"><span id="mt5-health" class="health-light"></span><span><strong>MT5</strong><small id="mt5-text">Checking…</small></span></div>
       <div class="health-item"><span id="account-health" class="health-light"></span><span><strong>Account</strong><small id="account-text">Checking…</small></span></div>
-      <div class="health-item positions"><span><strong>Open positions</strong><small id="position-text">—</small></span></div>
+      <div class="health-item positions"><span><strong>FX2Active exposure</strong><small id="position-text">—</small></span></div>
       <button id="diagnose" class="secondary" type="button">Run system check</button>
     </section>
     <p id="system-message" class="system-message">Starting local system…</p>
@@ -46,9 +46,9 @@
 
       <article class="card">
         <h2>Entry</h2>
-        <label>Trading symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. EURUSD or EURUSD.a" autocomplete="off"></label>
+        <label>Trading symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. XAUUSDm or EURUSD.a" autocomplete="off"></label>
         <label>Confirmation trigger<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
-        <label>Maximum open positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
+        <label>Maximum FX2Active positions/orders<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
         <div class="locked"><span>M15 timeframe</span><span>BUY + SELL</span></div>
       </article>
 
@@ -63,10 +63,16 @@
 
       <article class="card">
         <h2>Order Execution</h2>
-        <p class="muted">Choose how a qualified setup should enter the market.</p>
+        <p class="muted">Broker execution is armed separately from strategy detection.</p>
+        <label class="switch-row"><span><strong>Execute orders in MT5</strong><small>When OFF, FX2Active only detects and plans setups.</small></span><input id="live_execution_enabled" type="checkbox"><span class="switch"></span></label>
+        <label class="switch-row"><span><strong>Allow real/live account</strong><small>Keep OFF for demo testing. A real MT5 account is blocked while this is OFF.</small></span><input id="allow_live_account" type="checkbox"><span class="switch"></span></label>
         <label>Execution mode<select id="execution_mode"><option value="market_on_trigger">Market order after confirmation trigger</option><option value="pending_limit">Pending limit at the 78.6% Fib price</option></select></label>
+        <div class="two-col">
+          <label>Maximum spread (pips)<input id="max_spread_pips" type="number" min="0" max="10000" step="0.1"><small>0 disables this guard.</small></label>
+          <label>Max deviation (points)<input id="max_deviation_points" type="number" min="0" max="10000" step="1"></label>
+        </div>
         <div id="execution-help" class="locked"><span>Market mode</span><span>Uses the Entry confirmation above</span></div>
-        <p class="muted compact-note">This setting is saved now. Live order submission remains disabled until the MT5 execution adapter is enabled and tested.</p>
+        <p class="muted compact-note">FX2Active uses magic number 26091501, performs broker pre-checks, and blocks duplicate submissions for the same setup.</p>
       </article>
 
       <article class="card wide">
