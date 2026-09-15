@@ -199,11 +199,17 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
 
             def loss_calculator(setup: Any) -> float | None:
                 order_type = mt5.ORDER_TYPE_BUY if setup.side == "BUY" else mt5.ORDER_TYPE_SELL
+                risk_entry = float(setup.entry)
+                if settings.execution_mode == "market_on_trigger":
+                    tick = mt5.symbol_info_tick(symbol)
+                    if tick is None:
+                        return None
+                    risk_entry = float(tick.ask if setup.side == "BUY" else tick.bid)
                 calculated = mt5.order_calc_profit(
                     order_type,
                     symbol,
                     1.0,
-                    float(setup.entry),
+                    risk_entry,
                     float(setup.stop_loss),
                 )
                 return abs(float(calculated)) if calculated is not None else None
@@ -278,7 +284,14 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         candles = self._candles_from_bridge_rates(snapshot.get("rates"))
 
         def loss_calculator(setup: Any) -> float | None:
-            return bridge_loss_per_one_lot(symbol_info, float(setup.entry), float(setup.stop_loss))
+            risk_entry = float(setup.entry)
+            if settings.execution_mode == "market_on_trigger":
+                risk_entry = float(
+                    symbol_info.get("ask" if setup.side == "BUY" else "bid", 0.0) or 0.0
+                )
+                if risk_entry <= 0:
+                    return None
+            return bridge_loss_per_one_lot(symbol_info, risk_entry, float(setup.stop_loss))
 
         self.execution_context = {
             "platform": "Darwin",
