@@ -7,7 +7,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from fx2active_bot.local_runtime import run_local_system  # noqa: E402
+from fx2active_bot.execution_runtime import run_execution_system  # noqa: E402
 
 
 if __name__ == "__main__":
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     if access_mode == "lan" and not dashboard_pin:
         raise SystemExit("LAN mode requires FX2ACTIVE_DASHBOARD_PIN")
 
-    run_local_system(
+    run_execution_system(
         ROOT,
         host=host,
         port=8080,
