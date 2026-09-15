@@ -44,10 +44,15 @@ class ExecutionStateStore:
             return {"processed": {}}
         try:
             payload = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {"processed": {}}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                "FX2Active execution-state file is unreadable. Order submission is blocked "
+                "until the state file is inspected or repaired."
+            ) from exc
         if not isinstance(payload, dict) or not isinstance(payload.get("processed"), dict):
-            return {"processed": {}}
+            raise RuntimeError(
+                "FX2Active execution-state file has an invalid format. Order submission is blocked."
+            )
         return payload
 
     def contains(self, fingerprint: str) -> bool:
@@ -98,11 +103,25 @@ def _magic_matches(item: Any) -> bool:
     return int(getattr(item, "magic", 0) or 0) == FX2ACTIVE_MAGIC
 
 
-def count_bot_exposure(mt5: Any, symbol: str) -> tuple[int, int]:
-    positions = mt5.positions_get(symbol=symbol)
-    orders = mt5.orders_get(symbol=symbol)
-    position_count = sum(1 for item in positions or () if _magic_matches(item))
-    pending_count = sum(1 for item in orders or () if _magic_matches(item))
+def count_bot_exposure(mt5: Any, symbol: str | None = None) -> tuple[int, int]:
+    """Count FX2Active-owned positions/orders, optionally restricted to one symbol.
+
+    None from MetaTrader means the query itself failed, so fail closed instead
+    of treating an API error as zero exposure.
+    """
+
+    if symbol:
+        positions = mt5.positions_get(symbol=symbol)
+        orders = mt5.orders_get(symbol=symbol)
+    else:
+        positions = mt5.positions_get()
+        orders = mt5.orders_get()
+
+    if positions is None or orders is None:
+        raise RuntimeError(f"Could not read MT5 positions/orders: {mt5.last_error()}")
+
+    position_count = sum(1 for item in positions if _magic_matches(item))
+    pending_count = sum(1 for item in orders if _magic_matches(item))
     return position_count, pending_count
 
 
@@ -231,7 +250,7 @@ class WindowsTradeExecutor:
         if not bool(getattr(account, "trade_allowed", False)):
             return ExecutionResult(False, "blocked", "MT5 account trading is not allowed.", fingerprint)
 
-        positions, pending_orders = count_bot_exposure(mt5, symbol)
+        positions, pending_orders = count_bot_exposure(mt5)
         if positions + pending_orders >= settings.max_open_positions:
             return ExecutionResult(
                 False,
@@ -406,9 +425,24 @@ class WindowsTradeExecutor:
             if attempts <= 2 and retcode in _safe_retry_retcodes(mt5) and not pending:
                 refreshed = mt5.symbol_info_tick(symbol)
                 if refreshed is not None:
-                    bid = float(getattr(refreshed, "bid", bid) or bid)
-                    ask = float(getattr(refreshed, "ask", ask) or ask)
-                    request["price"] = _normalize_price(ask if side == "BUY" else bid, digits)
+                    bid = float(getattr(refreshed, "bid", 0.0) or 0.0)
+                    ask = float(getattr(refreshed, "ask", 0.0) or 0.0)
+                    if bid <= 0 or ask <= 0 or ask < bid:
+                        break
+                    retry_spread = (ask - bid) / pip_size
+                    if settings.max_spread_pips > 0 and retry_spread > settings.max_spread_pips:
+                        return ExecutionResult(
+                            False,
+                            "blocked",
+                            f"Spread widened to {retry_spread:.1f} pips; retry cancelled.",
+                            fingerprint,
+                        )
+                    retry_price = _normalize_price(ask if side == "BUY" else bid, digits)
+                    if side == "BUY" and not (sl < retry_price < tp):
+                        break
+                    if side == "SELL" and not (tp < retry_price < sl):
+                        break
+                    request["price"] = retry_price
                     checked = mt5.order_check(request)
                     if checked is not None and int(getattr(checked, "retcode", -1)) == 0:
                         continue
