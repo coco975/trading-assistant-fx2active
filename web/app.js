@@ -7,8 +7,6 @@ const ids = [
   'candle_confirmation','min_confirmations'
 ];
 
-const TRADE_LOG_KEY = 'fx2active_trade_log_v1';
-const TRADE_LOG_LIMIT = 100;
 const $ = (id) => document.getElementById(id);
 const status = $('status');
 const dot = $('status-dot');
@@ -187,32 +185,7 @@ function renderFibSetup(setup, symbol='') {
   content.classList.remove('hidden');
 }
 
-function readTradeLog() {
-  try {
-    const value = JSON.parse(localStorage.getItem(TRADE_LOG_KEY) || '[]');
-    return Array.isArray(value) ? value : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-function writeTradeLog(events) {
-  try {
-    localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(events.slice(0, TRADE_LOG_LIMIT)));
-  } catch (_) {
-    // Dashboard status continues even if browser storage is unavailable.
-  }
-}
-
-function addTradeEvent(event) {
-  const events = readTradeLog();
-  if (events.some((item) => item.key === event.key)) return;
-  events.unshift(event);
-  writeTradeLog(events);
-  renderTradeLog(events);
-}
-
-function renderTradeLog(events=readTradeLog()) {
+function renderTradeLog(events=[]) {
   const list = $('trade-log-list');
   list.innerHTML = '';
   if (!events.length) {
@@ -228,7 +201,7 @@ function renderTradeLog(events=readTradeLog()) {
     row.className = 'trade-log-row';
 
     const fields = [
-      formatTime(event.time),
+      formatTime(event.timestamp_utc),
       event.symbol || '—',
       event.event || '—',
       event.side || '—',
@@ -246,39 +219,14 @@ function renderTradeLog(events=readTradeLog()) {
   });
 }
 
-function captureTradeActivity(systemStatus) {
-  const setup = systemStatus.last_setup;
-  if (setup) {
-    const setupKey = [
-      'setup', systemStatus.symbol, setup.side, setup.swing_high, setup.swing_low, setup.entry
-    ].join('|');
-    addTradeEvent({
-      key: setupKey,
-      time: systemStatus.heartbeat_at || new Date().toISOString(),
-      symbol: systemStatus.symbol,
-      event: 'Setup',
-      side: setup.side,
-      price: setup.entry,
-      volume: setup.planned_volume,
-      status: 'Detected'
-    });
-  }
-
-  const result = systemStatus.execution_result;
-  if (result && !['disabled', 'duplicate'].includes(String(result.status || '').toLowerCase())) {
-    const executionKey = [
-      'execution', result.fingerprint, result.status, result.order_ticket || '', result.deal_ticket || '', result.retcode || ''
-    ].join('|');
-    addTradeEvent({
-      key: executionKey,
-      time: systemStatus.heartbeat_at || new Date().toISOString(),
-      symbol: systemStatus.symbol,
-      event: 'Execution',
-      side: setup?.side || '—',
-      price: result.price ?? setup?.entry ?? null,
-      volume: result.volume ?? setup?.planned_volume ?? null,
-      status: String(result.status || 'Result').replaceAll('_', ' ')
-    });
+async function loadTradeLog() {
+  try {
+    const r = await fetch('/api/trade-log', {cache:'no-store'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    renderTradeLog(Array.isArray(data.events) ? data.events : []);
+  } catch (_) {
+    renderTradeLog([]);
   }
 }
 
@@ -318,7 +266,6 @@ async function loadSystemStatus() {
     }
 
     renderFibSetup(s.last_setup, s.symbol);
-    captureTradeActivity(s);
 
     let message = s.message || 'FX2Active running';
     if (s.execution_result?.order_ticket) {
@@ -371,6 +318,7 @@ async function diagnose() {
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     renderDiagnostics(data);
     await loadSystemStatus();
+    await loadTradeLog();
   } catch (e) {
     mark(`System check failed: ${e.message}`, 'error');
   } finally {
@@ -393,7 +341,10 @@ async function apply() {
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
     setForm(data.settings);
     mark('Settings applied');
-    setTimeout(loadSystemStatus, 500);
+    setTimeout(async () => {
+      await loadSystemStatus();
+      await loadTradeLog();
+    }, 500);
   } catch (e) {
     mark(`Update failed: ${e.message}`, 'error');
   } finally {
@@ -407,11 +358,25 @@ $('execution_mode').addEventListener('change', updateExecutionHelp);
 $('apply').addEventListener('click', apply);
 $('diagnose').addEventListener('click', diagnose);
 $('close-diagnostics').addEventListener('click', () => $('diagnostic-card').classList.add('hidden'));
-$('clear-trade-log').addEventListener('click', () => {
-  writeTradeLog([]);
-  renderTradeLog([]);
+$('clear-trade-log').addEventListener('click', async () => {
+  const button = $('clear-trade-log');
+  button.disabled = true;
+  try {
+    const r = await fetch('/api/trade-log/clear', {method:'POST'});
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    renderTradeLog([]);
+  } catch (e) {
+    mark(`Could not clear trade log: ${e.message}`, 'error');
+  } finally {
+    button.disabled = false;
+  }
 });
 
-renderTradeLog();
-loadSettings().then(loadSystemStatus);
-setInterval(loadSystemStatus, 3000);
+async function refreshDashboard() {
+  await loadSystemStatus();
+  await loadTradeLog();
+}
+
+renderTradeLog([]);
+loadSettings().then(refreshDashboard);
+setInterval(refreshDashboard, 3000);
