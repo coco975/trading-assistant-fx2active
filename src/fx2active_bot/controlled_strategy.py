@@ -22,6 +22,7 @@ class WebControlledFibStrategy:
         candles: Sequence[Candle],
         *,
         current_open_positions: int = 0,
+        current_bar_is_open: bool = False,
     ) -> TradeSetup | None:
         settings = self.store.load()
         if not settings.trading_enabled or not settings.fib_enabled:
@@ -29,6 +30,20 @@ class WebControlledFibStrategy:
         if current_open_positions >= settings.max_open_positions:
             return None
         if not settings.allow_buys and not settings.allow_sells:
+            return None
+        if not candles:
+            return None
+
+        # MT5 position-0 rates include the currently forming M15 candle. Never
+        # use that unfinished candle to confirm fractal structure or a close.
+        if current_bar_is_open:
+            if len(candles) < 2:
+                return None
+            structure_candles: Sequence[Candle] = candles[:-1]
+        else:
+            structure_candles = candles
+
+        if not structure_candles:
             return None
 
         config = StrategyConfig(
@@ -39,35 +54,39 @@ class WebControlledFibStrategy:
         )
         poi_rule = ConfigurablePOIRule(settings.poi, pip_size=self.pip_size)
         setup = DualFibStrategy(config, poi_rule).find_setup(
-            candles,
+            structure_candles,
             allow_buys=settings.allow_buys,
             allow_sells=settings.allow_sells,
         )
-        if setup is None or not candles:
+        if setup is None:
             return None
 
-        # A pending limit is intentionally placed at the Fib price before a market
-        # touch. Market mode still waits for the selected confirmation trigger.
+        # Pending limits are intentionally placed at the Fib price before a
+        # market touch. Their structure/POI qualification still uses closed bars.
         if settings.execution_mode == "pending_limit":
             return setup
 
-        last = candles[-1]
-        touched = last.low <= setup.entry <= last.high
         if settings.entry_trigger == "touch":
+            trigger = candles[-1]
+            touched = trigger.low <= setup.entry <= trigger.high
             return setup if touched else None
+
+        # Close-based triggers use the most recent completed M15 candle.
+        trigger = structure_candles[-1]
+        touched = trigger.low <= setup.entry <= trigger.high
 
         if settings.entry_trigger == "close_back_in_direction":
             if setup.side == "BUY":
-                confirmed = last.low <= setup.entry and last.close > setup.entry
+                confirmed = trigger.low <= setup.entry and trigger.close > setup.entry
             else:
-                confirmed = last.high >= setup.entry and last.close < setup.entry
+                confirmed = trigger.high >= setup.entry and trigger.close < setup.entry
             return setup if confirmed else None
 
         if settings.entry_trigger == "directional_close":
             if setup.side == "BUY":
-                confirmed = touched and last.close > last.open and last.close >= setup.entry
+                confirmed = touched and trigger.close > trigger.open and trigger.close >= setup.entry
             else:
-                confirmed = touched and last.close < last.open and last.close <= setup.entry
+                confirmed = touched and trigger.close < trigger.open and trigger.close <= setup.entry
             return setup if confirmed else None
 
         return None
