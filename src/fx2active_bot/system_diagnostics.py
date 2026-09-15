@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import platform
 import socket
 import sys
@@ -9,7 +10,14 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .mac_bridge import load_snapshot, snapshot_age_seconds, snapshot_is_fresh
+from .mac_bridge import (
+    BRIDGE_PROTOCOL_VERSION,
+    bridge_source_needs_compile,
+    find_installed_bridge_sources,
+    load_snapshot,
+    snapshot_age_seconds,
+    snapshot_is_fresh,
+)
 from .runtime_settings import RuntimeSettingsStore
 
 
@@ -46,6 +54,17 @@ def _mask_login(login: Any) -> str | None:
 
 
 def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) -> None:
+    architecture_ok = sys.maxsize > 2**32
+    checks.append(
+        DiagnosticCheck(
+            "Python architecture",
+            architecture_ok,
+            "64-bit Python" if architecture_ok else "64-bit Python is required for MetaTrader5",
+        )
+    )
+    if not architecture_ok:
+        return
+
     mt5_spec = importlib.util.find_spec("MetaTrader5")
     if mt5_spec is None:
         checks.append(
@@ -127,6 +146,31 @@ def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) 
 
 
 def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) -> None:
+    sources = find_installed_bridge_sources()
+    if sources:
+        needs_compile = all(bridge_source_needs_compile(source) for source in sources)
+        checks.append(
+            DiagnosticCheck(
+                "FX2Active bridge program",
+                not needs_compile,
+                (
+                    "Latest FX2ActiveBridge source and compiled EA were detected"
+                    if not needs_compile
+                    else "Latest bridge source is installed but FX2ActiveBridge.ex5 is missing or older; compile it once in MetaEditor"
+                ),
+                level="warning" if needs_compile else "error",
+            )
+        )
+    else:
+        checks.append(
+            DiagnosticCheck(
+                "FX2Active bridge program",
+                False,
+                "FX2ActiveBridge.mq5 is not installed in a detected MT5 MQL5/Experts folder",
+                level="warning",
+            )
+        )
+
     try:
         snapshot, path = load_snapshot()
     except Exception as exc:
@@ -134,20 +178,20 @@ def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) ->
             DiagnosticCheck(
                 "FX2Active MT5 bridge",
                 False,
-                f"{exc} Compile bridge/FX2ActiveBridge.mq5 in MetaEditor, attach it to one chart, and keep MT5 open.",
+                f"{exc} Keep MT5 open, compile/attach FX2ActiveBridge, then run the check again.",
             )
         )
         return
 
     fresh = snapshot_is_fresh(snapshot)
     age = snapshot_age_seconds(snapshot)
-    checks.append(
-        DiagnosticCheck(
-            "FX2Active MT5 bridge",
-            fresh,
-            f"Bridge is updating ({age:.1f}s old)" if fresh else f"Bridge snapshot is stale ({age:.1f}s old)",
-        )
-    )
+    if fresh:
+        bridge_message = f"Bridge protocol {BRIDGE_PROTOCOL_VERSION} is updating ({age:.1f}s old)"
+    elif math.isfinite(age):
+        bridge_message = f"Bridge snapshot is stale ({age:.1f}s old)"
+    else:
+        bridge_message = "Bridge heartbeat is invalid, out of date, or the Mac clock is not synchronized"
+    checks.append(DiagnosticCheck("FX2Active MT5 bridge", fresh, bridge_message))
 
     terminal = snapshot.get("terminal") if isinstance(snapshot.get("terminal"), dict) else {}
     account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
@@ -184,6 +228,9 @@ def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) ->
         details["mt5"] = {
             "connection": "mac_file_bridge",
             "bridge_path": str(path),
+            "bridge_protocol": snapshot.get("protocol_version"),
+            "bridge_version": snapshot.get("bridge_version"),
+            "terminal_build": terminal.get("build"),
             "connected": connected,
             "server": server,
             "login_masked": _mask_login(login),
