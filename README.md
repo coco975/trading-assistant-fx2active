@@ -4,13 +4,13 @@ FX2Active is a local MT5 trading assistant with a browser control panel for **Wi
 
 ## Before You Start
 
-- Install MetaTrader 5.
-- Log into the trading account you want FX2Active to use.
-- Make sure your GitHub account has access to this private repository.
+- Install MetaTrader 5 and log into the account you want FX2Active to use.
+- Keep MT5 open while FX2Active is running.
+- Start with a **demo account** until the execution tests on your own MT5 installation are complete.
 
 # Windows Setup
 
-Open **PowerShell** and run these commands one at a time.
+Open **PowerShell** and run:
 
 ```powershell
 cd $HOME\Documents
@@ -25,9 +25,7 @@ If `git` is not installed:
 winget install --id Git.Git -e
 ```
 
-Then close PowerShell, open it again, and run the setup commands above.
-
-### Start it again later
+### Start/update later
 
 ```powershell
 cd $HOME\Documents\trading-assistant-fx2active
@@ -35,9 +33,11 @@ git pull
 .\START_FX2ACTIVE.bat
 ```
 
+FX2Active checks Python, the local environment, MT5 connectivity, trading permissions, settings and the dashboard port before starting.
+
 # macOS Setup
 
-Open **Terminal** and run these commands one at a time.
+Keep your broker's MT5 app open, then open **Terminal** and run:
 
 ```bash
 cd ~/Documents
@@ -47,11 +47,19 @@ chmod +x START_FX2ACTIVE_MAC.command
 ./START_FX2ACTIVE_MAC.command
 ```
 
-If macOS asks to install Command Line Tools/Git, allow it and then run the commands again.
+If macOS asks to install Command Line Tools/Git, allow it and run the commands again.
 
-On the first Mac setup, FX2Active uses `FX2ActiveBridge.mq5` to connect the local app to MT5. Follow the launcher instructions to compile it in MetaEditor, attach **FX2ActiveBridge** to one MT5 chart, and enable Algo Trading.
+FX2Active automatically tries to locate broker-branded MT5/Wine data folders, creates `MQL5/Experts/FX2Active`, and copies the latest `FX2ActiveBridge.mq5` there.
 
-### Start it again later
+The first time the bridge changes, one MetaEditor step is still required:
+
+1. Open MetaEditor from MT5.
+2. Open `Experts > FX2Active > FX2ActiveBridge.mq5`.
+3. Press **Compile** (`F7` or `Fn + F7`).
+4. Attach **FX2ActiveBridge** to one MT5 chart.
+5. Turn **Algo Trading** on and leave that chart open.
+
+### Start/update later
 
 ```bash
 cd ~/Documents/trading-assistant-fx2active
@@ -59,43 +67,55 @@ git pull
 ./START_FX2ACTIVE_MAC.command
 ```
 
+The launcher checks whether the installed bridge source or compiled `.ex5` is stale and tells you when another compile is needed.
+
 # Dashboard Access
 
 When FX2Active starts, choose:
 
-- **1 — This computer only**: use the dashboard only on the PC/Mac running FX2Active.
-- **2 — Same Wi-Fi/LAN**: open the dashboard from another phone, tablet, or computer on the same private network.
+- **1 — This computer only** — dashboard only on the PC/Mac running FX2Active.
+- **2 — Same Wi-Fi/LAN** — dashboard available to another device on the same private network using a temporary PIN.
 
-For option 2, the launcher shows a dashboard address and PIN. Open the address on the other device and enter the PIN once. You stay signed in for that browser session.
+Do not expose port `8080` through router port forwarding or a public tunnel.
 
-# Web Interface
+# Main Controls
 
-- **Trading enabled** — master switch for allowing new setups.
-- **Worker / MT5 / Account** — shows whether FX2Active, MT5, and the trading account are connected.
-- **Trading symbol** — enter the exact MT5 symbol, for example `EURUSD`, `XAUUSD`, or the broker's version such as `XAUUSD.x`.
-- **BUY / SELL** — choose which trade directions FX2Active may use.
-- **Fib retracement** — strategy retracement level. Default is `0.786`.
-- **Stop buffer** — extra pips beyond the swing used for the stop loss.
-- **Confirmation trigger** — decides what must happen at the Fib level before a setup qualifies.
-- **Maximum open positions** — maximum number of positions allowed at once.
-- **Risk %** — risk a percentage of account equity per trade.
-- **Fixed lot** — always use the selected lot size.
-- **Fixed cash** — risk a fixed amount in the MT5 account currency.
-- **Market after confirmation** — enter after the selected confirmation trigger.
-- **Pending at 78.6%** — use the Fib price as the intended pending-entry level.
-- **Points of Interest** — extra confirmations such as support/resistance, previous swing, trendline, round-number level, and candle confirmation.
-- **Minimum confirmations** — how many enabled POIs must agree before the setup qualifies.
-- **Run system check** — checks the computer, MT5 connection, account, and FX2Active setup.
-- **Done — Apply to Bot** — saves the settings and applies them to the worker.
+- **Trading enabled** — lets the strategy look for new entries.
+- **Execute orders in MT5** — separately arms broker/demo order submission.
+- **Allow real/live account** — separately permits execution on a real account. Keep this OFF while demo testing.
+- **Trading symbol** — use the exact broker symbol, such as `XAUUSDm` or `XAUUSD.x`.
+- **BUY / SELL** — allowed directions.
+- **Fib retracement** — default `0.786`.
+- **Stop buffer** — extra pips beyond the swing for SL.
+- **Risk % / Fixed lot / Fixed cash** — position-sizing mode.
+- **Market after confirmation** — submit a market order after the configured confirmation.
+- **Pending at 78.6%** — place a limit order at the Fib entry.
+- **Maximum open positions** — global FX2Active exposure limit.
+- **Maximum spread** — blocks execution when spread is too high; `0` disables this guard.
+- **Maximum deviation** — MT5 order deviation in points.
+- **Run system check** — checks computer, MT5, account, permissions and the current bridge.
+
+FX2Active uses magic number `26091501` and comment `FX2Active` so its own positions/orders can be distinguished from manual trades.
+
+# First Demo Execution Check
+
+Before relying on automated execution:
+
+1. Use a demo account.
+2. Run **System Check** and make sure MT5/account/bridge checks are healthy.
+3. Keep **Allow real/live account** OFF.
+4. Start with the broker minimum practical lot/risk.
+5. Enable **Trading enabled** and **Execute orders in MT5**.
+6. Verify the first order inside MT5: side, symbol, volume, entry, SL, TP and FX2Active ownership.
+7. Restart FX2Active and confirm the same setup is not submitted twice.
+8. Test disconnect/reconnect behavior before considering any real account.
 
 # Stop FX2Active
 
-Keep the launcher/Terminal window open while FX2Active is running.
-
-Press:
+Keep the launcher/Terminal window open while FX2Active is running. Press:
 
 ```text
 Ctrl + C
 ```
 
-> Live broker order submission is currently disabled while the execution layer is being completed and tested.
+Order execution is implemented, but **real-account permission remains OFF by default** and should stay OFF until the demo execution checks pass on your own MT5 installation.
