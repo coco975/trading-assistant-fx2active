@@ -12,71 +12,71 @@
       <div>
         <p class="eyebrow">FX2ACTIVE • LOCAL CONTROL</p>
         <h1>Trading Control</h1>
-        <p class="muted">The worker uses these settings on the next strategy check.</p>
+        <p class="muted">Configure strategy, risk and execution settings.</p>
       </div>
       <label class="master switch-row">
-        <span><strong>Trading enabled</strong><small>Master switch for new setups</small></span>
+        <span><strong>Trading Active</strong><small>Enable new trade setups</small></span>
         <input id="trading_enabled" type="checkbox"><span class="switch"></span>
       </label>
     </header>
 
     <section class="system-strip">
-      <div class="health-item"><span id="worker-health" class="health-light"></span><span><strong>Worker</strong><small id="worker-text">Checking…</small></span></div>
+      <div class="health-item"><span id="worker-health" class="health-light"></span><span><strong>System</strong><small id="worker-text">Checking…</small></span></div>
       <div class="health-item"><span id="mt5-health" class="health-light"></span><span><strong>MT5</strong><small id="mt5-text">Checking…</small></span></div>
       <div class="health-item"><span id="account-health" class="health-light"></span><span><strong>Account</strong><small id="account-text">Checking…</small></span></div>
-      <div class="health-item positions"><span><strong>FX2Active exposure</strong><small id="position-text">—</small></span></div>
-      <button id="diagnose" class="secondary" type="button">Run system check</button>
+      <div class="health-item positions"><span><strong>Active Exposure</strong><small id="position-text">—</small></span></div>
+      <button id="diagnose" class="secondary" type="button">System Check</button>
     </section>
-    <p id="system-message" class="system-message">Starting local system…</p>
+    <p id="system-message" class="system-message">Starting FX2Active…</p>
 
     <section class="grid">
       <article class="card">
         <h2>78.6% Fibonacci</h2>
-        <label class="switch-row"><span><strong>Use Fibonacci entry</strong><small>BUY: low → high • SELL: high → low</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
+        <label class="switch-row"><span><strong>Fibonacci Entry</strong><small>BUY: low → high • SELL: high → low</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
         <div class="toggle-grid two-options">
           <label class="toggle-card"><input id="allow_buys" type="checkbox"><span><strong>BUY</strong><small>SL below swing low • TP swing high</small></span></label>
           <label class="toggle-card"><input id="allow_sells" type="checkbox"><span><strong>SELL</strong><small>SL above swing high • TP swing low</small></span></label>
         </div>
         <div class="two-col">
-          <label>Fib retracement<input id="fib_retracement" type="number" min="0.5" max="0.95" step="0.001"></label>
-          <label>Stop buffer (pips)<input id="stop_buffer_pips" type="number" min="1" max="100" step="1"></label>
+          <label>Fib Retracement<input id="fib_retracement" type="number" min="0.5" max="0.95" step="0.001"></label>
+          <label>Stop Buffer (pips)<input id="stop_buffer_pips" type="number" min="1" max="100" step="1"></label>
         </div>
-        <label>Take profit<select id="take_profit_mode"><option value="swing_target">Opposite swing target</option></select></label>
+        <label>Take Profit<select id="take_profit_mode"><option value="swing_target">Opposite Swing Target</option></select></label>
       </article>
 
       <article class="card">
-        <h2>Entry</h2>
-        <label>Trading symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. XAUUSDm or EURUSD.a" autocomplete="off"></label>
-        <label>Confirmation trigger<select id="entry_trigger"><option value="touch">First touch of Fib zone</option><option value="close_back_in_direction">Touch then close back in direction</option><option value="directional_close">Touch then directional candle close</option></select></label>
-        <label>Maximum FX2Active positions/orders<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
-        <div class="locked"><span>M15 timeframe</span><span>BUY + SELL</span></div>
+        <h2>Entry Setup</h2>
+        <label>Trading Symbol<input id="symbol" type="text" maxlength="64" placeholder="e.g. XAUUSDm or EURUSD.a" autocomplete="off"></label>
+        <label>Entry Confirmation<select id="entry_trigger"><option value="touch">First Touch</option><option value="close_back_in_direction">Touch + Close Back in Direction</option><option value="directional_close">Directional Candle Close</option></select></label>
+        <label>Maximum Open Positions<input id="max_open_positions" type="number" min="1" max="20" step="1"></label>
+        <div class="locked"><span>M15 Timeframe</span><span>BUY + SELL</span></div>
       </article>
 
       <article class="card">
         <h2>Risk & Position Size</h2>
-        <p class="muted">Choose how this account should size each trade.</p>
-        <label>Position sizing<select id="sizing_mode"><option value="risk_percent">Risk % of account equity</option><option value="fixed_lot">Fixed lot size</option><option value="fixed_cash">Fixed cash risk</option></select></label>
-        <label id="risk-percent-row" class="conditional">Risk per trade (%)<input id="risk_percent" type="number" min="0.01" max="100" step="0.01"></label>
-        <label id="fixed-lot-row" class="conditional hidden">Lot size<input id="fixed_lot" type="number" min="0.001" step="0.001"></label>
-        <label id="fixed-cash-row" class="conditional hidden">Cash risk per trade<input id="fixed_cash_risk" type="number" min="0.01" step="0.01"><small>Uses the currency of the connected MT5 account.</small></label>
+        <p class="muted">Set how position size is calculated for each trade.</p>
+        <label>Position Sizing<select id="sizing_mode"><option value="risk_percent">Risk % of Account Equity</option><option value="fixed_lot">Fixed Lot Size</option><option value="fixed_cash">Fixed Cash Risk</option></select></label>
+        <label id="risk-percent-row" class="conditional">Risk Per Trade (%)<input id="risk_percent" type="number" min="0.01" max="100" step="0.01"></label>
+        <label id="fixed-lot-row" class="conditional hidden">Lot Size<input id="fixed_lot" type="number" min="0.001" step="0.001"></label>
+        <label id="fixed-cash-row" class="conditional hidden">Cash Risk Per Trade<input id="fixed_cash_risk" type="number" min="0.01" step="0.01"><small>Uses the connected account currency.</small></label>
       </article>
 
       <article class="card">
         <h2>Order Execution</h2>
-        <p class="muted">Broker execution is armed separately from strategy detection.</p>
-        <label class="switch-row"><span><strong>Execute orders in MT5</strong><small>When OFF, FX2Active only detects and plans setups.</small></span><input id="live_execution_enabled" type="checkbox"><span class="switch"></span></label>
-        <label class="switch-row"><span><strong>Allow real/live account</strong><small>Keep OFF for demo testing. A real MT5 account is blocked while this is OFF.</small></span><input id="allow_live_account" type="checkbox"><span class="switch"></span></label>
-        <label>Execution mode<select id="execution_mode"><option value="market_on_trigger">Market order after confirmation trigger</option><option value="pending_limit">Pending limit at the 78.6% Fib price</option></select></label>
+        <p class="muted">Execution controls are separate from strategy monitoring.</p>
+        <label class="switch-row"><span><strong>MT5 Execution</strong><small>When OFF, setups are monitored without sending orders.</small></span><input id="live_execution_enabled" type="checkbox"><span class="switch"></span></label>
+        <label class="switch-row"><span><strong>Live Account Access</strong><small>Keep OFF during demo testing.</small></span><input id="allow_live_account" type="checkbox"><span class="switch"></span></label>
+        <label>Execution Mode<select id="execution_mode"><option value="market_on_trigger">Market Execution After Confirmation</option><option value="pending_limit">Pending Limit at 78.6%</option></select></label>
         <div class="two-col">
-          <label>Maximum spread (pips)<input id="max_spread_pips" type="number" min="0" max="10000" step="0.1"><small>0 disables this guard.</small></label>
-          <label>Max deviation (points)<input id="max_deviation_points" type="number" min="0" max="10000" step="1"></label>
+          <label>Maximum Spread (pips)<input id="max_spread_pips" type="number" min="0" max="10000" step="0.1"><small>0 = no spread limit.</small></label>
+          <label>Maximum Deviation (points)<input id="max_deviation_points" type="number" min="0" max="10000" step="1"></label>
         </div>
-        <div id="execution-help" class="locked"><span>Market mode</span><span>Uses the Entry confirmation above</span></div>
-        <p class="muted compact-note">FX2Active uses magic number 26091501, performs broker pre-checks, and blocks duplicate submissions for the same setup.</p>
+        <div id="execution-help" class="locked"><span>Market Execution</span><span>Uses the selected entry confirmation</span></div>
+        <p class="muted compact-note">Order validation and duplicate protection are applied automatically.</p>
       </article>
 
       <article class="card wide">
-        <div class="card-head"><div><h2>Points of Interest</h2><p class="muted">Turn confirmations on or off.</p></div><label>Minimum confirmations<input id="min_confirmations" type="number" min="0" max="5" step="1"></label></div>
+        <div class="card-head"><div><h2>Points of Interest</h2><p class="muted">Select the confirmations used for setup validation.</p></div><label>Minimum Confirmations<input id="min_confirmations" type="number" min="0" max="5" step="1"></label></div>
         <div class="toggle-grid">
           <label class="toggle-card"><input id="support_resistance" type="checkbox"><span><strong>Support / Resistance</strong><small>Horizontal reaction near entry</small></span></label>
           <label class="toggle-card"><input id="previous_swing" type="checkbox"><span><strong>Previous Swing</strong><small>Prior swing overlaps the Fib zone</small></span></label>
@@ -87,14 +87,14 @@
       </article>
 
       <article id="diagnostic-card" class="card wide diagnostic-card hidden">
-        <div class="card-head"><div><h2>System Check</h2><p class="muted">Only problems that need attention are highlighted.</p></div><button id="close-diagnostics" class="secondary" type="button">Close</button></div>
+        <div class="card-head"><div><h2>System Check</h2><p class="muted">Connection and configuration status.</p></div><button id="close-diagnostics" class="secondary" type="button">Close</button></div>
         <div id="diagnostic-list" class="diagnostic-list"></div>
       </article>
     </section>
 
     <footer class="action-bar">
       <div><span id="status-dot" class="status-dot"></span><span id="status">Loading settings…</span></div>
-      <button id="apply" type="button">Done — Apply to Bot</button>
+      <button id="apply" type="button">Save & Apply</button>
     </footer>
   </main>
   <script src="/app.js"></script>
