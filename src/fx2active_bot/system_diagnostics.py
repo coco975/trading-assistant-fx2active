@@ -105,13 +105,24 @@ def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) 
 
             terminal_trade_allowed = bool(getattr(terminal, "trade_allowed", False)) if terminal else False
             trade_api_disabled = bool(getattr(terminal, "tradeapi_disabled", True)) if terminal else True
-            permission_ok = terminal_trade_allowed and not trade_api_disabled
+            account_trade_allowed = bool(getattr(account, "trade_allowed", False)) if account else False
+            account_trade_expert = bool(getattr(account, "trade_expert", False)) if account else False
+            permission_ok = (
+                terminal_trade_allowed
+                and not trade_api_disabled
+                and account_trade_allowed
+                and account_trade_expert
+            )
             if permission_ok:
-                permission_message = "MT5 AutoTrading/Python trading access is enabled"
+                permission_message = "MT5 AutoTrading, Python API and Expert Advisor account permission are enabled"
             elif trade_api_disabled:
                 permission_message = "MT5 is blocking trading through the external Python API"
-            else:
+            elif not terminal_trade_allowed:
                 permission_message = "MT5 AutoTrading is currently disabled"
+            elif not account_trade_allowed:
+                permission_message = "The logged-in MT5 account does not allow trading"
+            else:
+                permission_message = "The logged-in MT5 account does not allow Expert Advisor automated trading"
             checks.append(
                 DiagnosticCheck(
                     "AutoTrading / API permission",
@@ -137,7 +148,9 @@ def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) 
                     "connected": connected,
                     "server": server,
                     "login_masked": _mask_login(login),
-                    "trade_allowed": terminal_trade_allowed,
+                    "trade_allowed": account_trade_allowed,
+                    "trade_expert": account_trade_expert,
+                    "terminal_trade_allowed": terminal_trade_allowed,
                     "trade_api_disabled": trade_api_disabled,
                     "trade_mode": getattr(account, "trade_mode", None),
                 }
@@ -234,12 +247,19 @@ def _macos_mt5_checks(
         )
     )
 
-    permission_ok = bool(terminal.get("trade_allowed")) and bool(account.get("trade_allowed"))
+    terminal_trade_allowed = bool(terminal.get("trade_allowed"))
+    account_trade_allowed = bool(account.get("trade_allowed"))
+    account_trade_expert = bool(account.get("trade_expert"))
+    permission_ok = terminal_trade_allowed and account_trade_allowed and account_trade_expert
     checks.append(
         DiagnosticCheck(
             "AutoTrading permission",
             permission_ok,
-            "MT5 Algo Trading is enabled" if permission_ok else "Enable Algo Trading in MT5",
+            (
+                "MT5 Algo Trading and Expert Advisor account permission are enabled"
+                if permission_ok
+                else "Enable Algo Trading and ensure the account allows Expert Advisor automated trading"
+            ),
         )
     )
 
@@ -265,7 +285,9 @@ def _macos_mt5_checks(
             "connected": connected,
             "server": server,
             "login_masked": _mask_login(login),
-            "trade_allowed": permission_ok,
+            "trade_allowed": account_trade_allowed,
+            "trade_expert": account_trade_expert,
+            "terminal_trade_allowed": terminal_trade_allowed,
             "trade_mode": account.get("trade_mode"),
         }
 
