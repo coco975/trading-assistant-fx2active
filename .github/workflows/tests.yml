@@ -31,6 +31,11 @@ jobs:
       - name: Static correctness checks
         run: python -m ruff check --select E4,E7,E9,F src scripts tests
 
+      - name: Validate dashboard JavaScript
+        run: |
+          node --check web/app.js
+          node --check web/login.js
+
       - name: Validate macOS launcher syntax
         if: runner.os == 'macOS'
         run: bash -n START_FX2ACTIVE_MAC.command
