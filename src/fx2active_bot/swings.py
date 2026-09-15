@@ -26,22 +26,37 @@ def is_swing_low(candles: Sequence[Candle], index: int, *, left: int = 2, right:
 def latest_bullish_swing_pair(
     candles: Sequence[Candle], *, left: int = 2, right: int = 2
 ) -> tuple[int, int] | None:
-    """Return latest confirmed (swing_low_index, swing_high_index)."""
+    """Return the latest confirmed swing low -> swing high impulse.
+
+    For the newest usable swing high, use the nearest confirmed swing low before
+    it. This avoids drawing a Fib from an unrelated older low when several lows
+    exist before the same high.
+    """
+
     lows = [i for i in range(len(candles)) if is_swing_low(candles, i, left=left, right=right)]
     highs = [i for i in range(len(candles)) if is_swing_high(candles, i, left=left, right=right)]
-    candidates = [(lo, hi) for lo in lows for hi in highs if lo < hi]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda pair: pair[1])
+
+    for high_index in reversed(highs):
+        preceding_lows = [index for index in lows if index < high_index]
+        if preceding_lows:
+            return preceding_lows[-1], high_index
+    return None
 
 
 def latest_bearish_swing_pair(
     candles: Sequence[Candle], *, left: int = 2, right: int = 2
 ) -> tuple[int, int] | None:
-    """Return latest confirmed (swing_high_index, swing_low_index)."""
+    """Return the latest confirmed swing high -> swing low impulse.
+
+    For the newest usable swing low, use the nearest confirmed swing high before
+    it so the selected impulse is local rather than anchored to an older high.
+    """
+
     highs = [i for i in range(len(candles)) if is_swing_high(candles, i, left=left, right=right)]
     lows = [i for i in range(len(candles)) if is_swing_low(candles, i, left=left, right=right)]
-    candidates = [(hi, lo) for hi in highs for lo in lows if hi < lo]
-    if not candidates:
-        return None
-    return max(candidates, key=lambda pair: pair[1])
+
+    for low_index in reversed(lows):
+        preceding_highs = [index for index in highs if index < low_index]
+        if preceding_highs:
+            return preceding_highs[-1], low_index
+    return None
