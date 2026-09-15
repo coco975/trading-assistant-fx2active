@@ -12,6 +12,7 @@ from typing import Any
 
 from .mac_bridge import (
     BRIDGE_PROTOCOL_VERSION,
+    BRIDGE_SOURCE_VERSION,
     bridge_source_needs_compile,
     find_installed_bridge_sources,
     load_snapshot,
@@ -138,6 +139,7 @@ def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) 
                     "login_masked": _mask_login(login),
                     "trade_allowed": terminal_trade_allowed,
                     "trade_api_disabled": trade_api_disabled,
+                    "trade_mode": getattr(account, "trade_mode", None),
                 }
         finally:
             mt5.shutdown()
@@ -145,7 +147,12 @@ def _windows_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) 
         checks.append(DiagnosticCheck("MT5 diagnostic", False, f"MT5 check failed: {exc}"))
 
 
-def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) -> None:
+def _macos_mt5_checks(
+    checks: list[DiagnosticCheck],
+    details: dict[str, Any],
+    *,
+    execution_requested: bool,
+) -> None:
     sources = find_installed_bridge_sources()
     if sources:
         needs_compile = all(bridge_source_needs_compile(source) for source in sources)
@@ -154,9 +161,9 @@ def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) ->
                 "FX2Active bridge program",
                 not needs_compile,
                 (
-                    "Latest FX2ActiveBridge source and compiled EA were detected"
+                    f"Latest FX2ActiveBridge v{BRIDGE_SOURCE_VERSION} source and compiled EA were detected"
                     if not needs_compile
-                    else "Latest bridge source is installed but FX2ActiveBridge.ex5 is missing or older; compile it once in MetaEditor"
+                    else f"Latest bridge v{BRIDGE_SOURCE_VERSION} source is installed but FX2ActiveBridge.ex5 is missing or older; compile it once in MetaEditor"
                 ),
                 level="warning" if needs_compile else "error",
             )
@@ -192,6 +199,29 @@ def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) ->
     else:
         bridge_message = "Bridge heartbeat is invalid, out of date, or the Mac clock is not synchronized"
     checks.append(DiagnosticCheck("FX2Active MT5 bridge", fresh, bridge_message))
+
+    bridge_version = str(snapshot.get("bridge_version", ""))
+    execution_bridge = bool(snapshot.get("execution_bridge"))
+    execution_ready = execution_bridge and bridge_version == BRIDGE_SOURCE_VERSION
+    if execution_ready:
+        execution_message = f"Trade-capable FX2ActiveBridge v{bridge_version} is attached"
+    elif not execution_bridge:
+        execution_message = (
+            f"Attached bridge is read-only/outdated. Compile and attach FX2ActiveBridge v{BRIDGE_SOURCE_VERSION}."
+        )
+    else:
+        execution_message = (
+            f"Attached bridge is v{bridge_version or 'unknown'}, expected v{BRIDGE_SOURCE_VERSION}. "
+            "Compile and attach the latest FX2ActiveBridge."
+        )
+    checks.append(
+        DiagnosticCheck(
+            "MT5 execution bridge",
+            execution_ready,
+            execution_message,
+            level="error" if execution_requested else "warning",
+        )
+    )
 
     terminal = snapshot.get("terminal") if isinstance(snapshot.get("terminal"), dict) else {}
     account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
@@ -229,12 +259,14 @@ def _macos_mt5_checks(checks: list[DiagnosticCheck], details: dict[str, Any]) ->
             "connection": "mac_file_bridge",
             "bridge_path": str(path),
             "bridge_protocol": snapshot.get("protocol_version"),
-            "bridge_version": snapshot.get("bridge_version"),
+            "bridge_version": bridge_version,
+            "execution_bridge": execution_bridge,
             "terminal_build": terminal.get("build"),
             "connected": connected,
             "server": server,
             "login_masked": _mask_login(login),
             "trade_allowed": permission_ok,
+            "trade_mode": account.get("trade_mode"),
         }
 
 
@@ -247,6 +279,7 @@ def run_diagnostics(
 ) -> dict[str, Any]:
     checks: list[DiagnosticCheck] = []
     details: dict[str, Any] = {}
+    execution_requested = False
 
     python_ok = sys.version_info >= (3, 11)
     checks.append(
@@ -265,9 +298,12 @@ def run_diagnostics(
 
     try:
         settings = RuntimeSettingsStore(settings_path).load()
+        execution_requested = settings.live_execution_enabled
         checks.append(DiagnosticCheck("Strategy settings", True, "Runtime settings loaded and validated"))
         details["settings"] = {
             "trading_enabled": settings.trading_enabled,
+            "live_execution_enabled": settings.live_execution_enabled,
+            "allow_live_account": settings.allow_live_account,
             "allow_buys": settings.allow_buys,
             "allow_sells": settings.allow_sells,
             "symbol": settings.symbol,
@@ -283,7 +319,7 @@ def run_diagnostics(
     if system == "Windows":
         _windows_mt5_checks(checks, details)
     elif system == "Darwin":
-        _macos_mt5_checks(checks, details)
+        _macos_mt5_checks(checks, details, execution_requested=execution_requested)
 
     ready = all(check.ok or check.level == "warning" for check in checks)
     return {
