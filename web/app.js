@@ -29,6 +29,14 @@ function formatPrice(value) {
   return number.toFixed(5);
 }
 
+function formatPnl(value) {
+  if (value === null || value === undefined || value === '') return '—';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  if (Math.abs(number) < 0.005) return '0.00';
+  return `${number > 0 ? '+' : ''}${number.toFixed(2)}`;
+}
+
 function formatTime(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -200,6 +208,10 @@ function renderTradeLog(events=[]) {
     const row = document.createElement('div');
     row.className = 'trade-log-row';
 
+    const pnl = event.net_profit;
+    const statusText = event.close_reason
+      ? `${event.status || 'Closed'} · ${event.close_reason}`
+      : (event.status || '—');
     const fields = [
       formatTime(event.timestamp_utc),
       event.symbol || '—',
@@ -207,12 +219,21 @@ function renderTradeLog(events=[]) {
       event.side || '—',
       event.price == null ? '—' : formatPrice(event.price),
       event.volume == null ? '—' : Number(event.volume).toFixed(2),
-      event.status || '—'
+      formatPnl(pnl),
+      statusText
     ];
     fields.forEach((value, index) => {
-      const cell = document.createElement(index === 6 ? 'strong' : 'span');
+      const cell = document.createElement(index === 7 ? 'strong' : 'span');
       cell.textContent = value;
-      if (index === 6) cell.className = `log-status ${String(event.status || '').toLowerCase()}`;
+      if (index === 6) {
+        const numeric = Number(pnl);
+        cell.className = Number.isFinite(numeric)
+          ? `log-pnl ${numeric > 0 ? 'positive' : numeric < 0 ? 'negative' : 'flat'}`
+          : 'log-pnl';
+      }
+      if (index === 7) {
+        cell.className = `log-status ${String(event.status || '').toLowerCase()}`;
+      }
       row.append(cell);
     });
     list.append(row);

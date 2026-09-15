@@ -10,12 +10,16 @@ from typing import Any
 
 
 class TradeLogStore:
-    """Persistent local history of detected setups and execution results."""
+    """Persistent local history of detected setups, execution and closed trades."""
 
     def __init__(self, path: str | Path, *, max_entries: int = 250) -> None:
         self.path = Path(path)
         self.max_entries = max_entries
         self._lock = threading.Lock()
+
+    @property
+    def suppression_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_cleared.json")
 
     def _load_unlocked(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -28,21 +32,34 @@ class TradeLogStore:
             raise RuntimeError("FX2Active trade log has an invalid format")
         return payload
 
-    def _save_unlocked(self, items: list[dict[str, Any]]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", dir=str(self.path.parent), text=True
-        )
+    def _load_suppressed_unlocked(self) -> set[str]:
+        if not self.suppression_path.exists():
+            return set()
+        try:
+            payload = json.loads(self.suppression_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return set()
+        if not isinstance(payload, list):
+            return set()
+        return {str(item) for item in payload if item}
+
+    @staticmethod
+    def _atomic_json_write(path: Path, payload: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent), text=True)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(items[-self.max_entries :], handle, indent=2, allow_nan=False)
+                json.dump(payload, handle, indent=2, allow_nan=False)
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(tmp_name, self.path)
+            os.replace(tmp_name, path)
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
+
+    def _save_unlocked(self, items: list[dict[str, Any]]) -> None:
+        self._atomic_json_write(self.path, items[-self.max_entries :])
 
     def read(self, *, limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), self.max_entries))
@@ -51,21 +68,53 @@ class TradeLogStore:
         return list(reversed(items[-limit:]))
 
     def clear(self) -> None:
+        """Clear visible history without letting recent broker history instantly repopulate it."""
+
         with self._lock:
+            items = self._load_unlocked()
+            suppressed = self._load_suppressed_unlocked()
+            suppressed.update(str(item.get("event_key", "")) for item in items if item.get("event_key"))
+            # Keep bounded suppression history. Event keys include swing times/tickets,
+            # so genuinely new setups and future close deals still appear normally.
+            bounded = list(suppressed)[-2000:]
+            self._atomic_json_write(self.suppression_path, bounded)
             self._save_unlocked([])
 
-    def _append_unlocked(self, items: list[dict[str, Any]], event: dict[str, Any]) -> bool:
-        event_key = str(event.get("event_key", ""))
-        if event_key and any(str(item.get("event_key", "")) == event_key for item in items):
-            return False
-        record = dict(event)
-        record.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
-        items.append(record)
-        self._save_unlocked(items)
-        return True
+    @staticmethod
+    def _profit_status(value: Any) -> str:
+        try:
+            net = float(value)
+        except (TypeError, ValueError):
+            return "Closed"
+        if net > 1e-9:
+            return "Profit"
+        if net < -1e-9:
+            return "Loss"
+        return "Breakeven"
+
+    @staticmethod
+    def _normalize_timestamp(value: Any, fallback: str) -> str:
+        if value is None or value == "":
+            return fallback
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return fallback
+        text = str(value).strip()
+        try:
+            numeric = float(text)
+        except ValueError:
+            return text
+        if numeric > 10_000_000:
+            try:
+                return datetime.fromtimestamp(numeric, tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return fallback
+        return text
 
     def capture_status(self, status: dict[str, Any]) -> None:
-        """Record new setup/execution events from the runtime status payload."""
+        """Record new setup, execution and broker-close events from runtime status."""
 
         if not isinstance(status, dict):
             return
@@ -77,6 +126,9 @@ class TradeLogStore:
             if isinstance(status.get("execution_result"), dict)
             else None
         )
+        closed_trades = status.get("closed_trades")
+        if not isinstance(closed_trades, list):
+            closed_trades = []
 
         pending: list[dict[str, Any]] = []
         if setup:
@@ -87,6 +139,8 @@ class TradeLogStore:
                     str(setup.get("side") or ""),
                     str(setup.get("swing_high") or ""),
                     str(setup.get("swing_low") or ""),
+                    str(setup.get("swing_high_time") or ""),
+                    str(setup.get("swing_low_time") or ""),
                     str(setup.get("entry") or ""),
                 )
             )
@@ -127,8 +181,12 @@ class TradeLogStore:
                         "event": "Execution",
                         "symbol": symbol,
                         "side": setup.get("side") if setup else None,
-                        "price": execution.get("price") if execution.get("price") is not None else (setup.get("entry") if setup else None),
-                        "volume": execution.get("volume") if execution.get("volume") is not None else (setup.get("planned_volume") if setup else None),
+                        "price": execution.get("price")
+                        if execution.get("price") is not None
+                        else (setup.get("entry") if setup else None),
+                        "volume": execution.get("volume")
+                        if execution.get("volume") is not None
+                        else (setup.get("planned_volume") if setup else None),
                         "status": execution.get("status") or "Result",
                         "message": execution.get("message"),
                         "retcode": execution.get("retcode"),
@@ -137,18 +195,82 @@ class TradeLogStore:
                     }
                 )
 
+        for closed in closed_trades:
+            if not isinstance(closed, dict):
+                continue
+            deal_ticket = closed.get("deal_ticket")
+            position_id = closed.get("position_id")
+            closed_at = self._normalize_timestamp(closed.get("timestamp_utc"), timestamp)
+            key_suffix = deal_ticket or f"{position_id}|{closed_at}|{closed.get('price')}"
+            net_profit = closed.get("net_profit")
+            pending.append(
+                {
+                    "event_key": f"closed|{key_suffix}",
+                    "timestamp_utc": closed_at,
+                    "event": "Closed",
+                    "symbol": closed.get("symbol") or symbol,
+                    "side": closed.get("side"),
+                    "price": closed.get("price"),
+                    "volume": closed.get("volume"),
+                    "status": self._profit_status(net_profit),
+                    "profit": closed.get("profit"),
+                    "commission": closed.get("commission"),
+                    "swap": closed.get("swap"),
+                    "fee": closed.get("fee"),
+                    "net_profit": net_profit,
+                    "close_reason": closed.get("close_reason"),
+                    "deal_ticket": deal_ticket,
+                    "position_id": position_id,
+                }
+            )
+
         if not pending:
             return
         with self._lock:
             items = self._load_unlocked()
+            existing_keys = {str(item.get("event_key", "")) for item in items}
+            suppressed_keys = self._load_suppressed_unlocked()
             changed = False
             for event in pending:
                 event_key = str(event.get("event_key", ""))
-                if event_key and any(str(item.get("event_key", "")) == event_key for item in items):
+                if event_key and (event_key in existing_keys or event_key in suppressed_keys):
                     continue
                 record = dict(event)
                 record.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
                 items.append(record)
+                if event_key:
+                    existing_keys.add(event_key)
                 changed = True
             if changed:
                 self._save_unlocked(items)
+
+
+def follow_runtime_status(
+    status_path: str | Path,
+    log_path: str | Path,
+    stop_event: threading.Event,
+    *,
+    poll_seconds: float = 0.5,
+) -> None:
+    """Persist runtime trade events even when no browser dashboard is open."""
+
+    status_file = Path(status_path)
+    store = TradeLogStore(log_path)
+    last_signature: tuple[int, int] | None = None
+
+    while not stop_event.is_set():
+        try:
+            stat = status_file.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            if signature != last_signature:
+                payload = json.loads(status_file.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    store.capture_status(payload)
+                last_signature = signature
+        except FileNotFoundError:
+            pass
+        except (OSError, json.JSONDecodeError, RuntimeError):
+            # Status writes are atomic, but a transient filesystem failure or a
+            # damaged optional history file must never stop trading/runtime health.
+            pass
+        stop_event.wait(poll_seconds)

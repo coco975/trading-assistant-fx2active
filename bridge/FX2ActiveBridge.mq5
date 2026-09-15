@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.22"
+#property version   "1.23"
 #property description "FX2Active local bridge for macOS MetaTrader 5"
 #property description "Attach this EA to one chart and keep Algo Trading enabled."
 
@@ -7,7 +7,7 @@
 #define FX2ACTIVE_ORDER_PROTOCOL 1
 #define FX2ACTIVE_MAGIC 26091501
 
-string BridgeVersion = "1.22";
+string BridgeVersion = "1.23";
 string BridgeFolder = "FX2Active";
 string SnapshotFile = "FX2Active\\snapshot.json";
 string SnapshotTempFile = "FX2Active\\snapshot.tmp";
@@ -141,6 +141,84 @@ string BuildRatesJson(string symbol)
               DoubleToString(rates[i].low,10)+","+
               DoubleToString(rates[i].close,10)+"]";
      }
+   result+="]";
+   return result;
+  }
+
+string CloseReasonName(long reason)
+  {
+   if(reason==DEAL_REASON_SL)
+      return "Stop Loss";
+   if(reason==DEAL_REASON_TP)
+      return "Take Profit";
+   if(reason==DEAL_REASON_EXPERT)
+      return "Expert";
+   if(reason==DEAL_REASON_CLIENT)
+      return "Terminal";
+   if(reason==DEAL_REASON_MOBILE)
+      return "Mobile";
+   if(reason==DEAL_REASON_WEB)
+      return "Web";
+   return "Closed";
+  }
+
+string BuildClosedDealsJson()
+  {
+   datetime to_time=TimeCurrent();
+   datetime from_time=to_time-(30*24*60*60);
+   if(!HistorySelect(from_time,to_time))
+      return "[]";
+
+   int total=HistoryDealsTotal();
+   string result="[";
+   int emitted=0;
+
+   for(int i=total-1;i>=0 && emitted<100;i--)
+     {
+      ulong ticket=HistoryDealGetTicket(i);
+      if(ticket==0)
+         continue;
+      if((long)HistoryDealGetInteger(ticket,DEAL_MAGIC)!=FX2ACTIVE_MAGIC)
+         continue;
+
+      long entry=HistoryDealGetInteger(ticket,DEAL_ENTRY);
+      if(entry!=DEAL_ENTRY_OUT && entry!=DEAL_ENTRY_OUT_BY && entry!=DEAL_ENTRY_INOUT)
+         continue;
+
+      long type=HistoryDealGetInteger(ticket,DEAL_TYPE);
+      string side="";
+      if(type==DEAL_TYPE_SELL)
+         side="BUY";
+      else if(type==DEAL_TYPE_BUY)
+         side="SELL";
+
+      double profit=HistoryDealGetDouble(ticket,DEAL_PROFIT);
+      double commission=HistoryDealGetDouble(ticket,DEAL_COMMISSION);
+      double swap=HistoryDealGetDouble(ticket,DEAL_SWAP);
+      double fee=HistoryDealGetDouble(ticket,DEAL_FEE);
+      double net_profit=profit+commission+swap+fee;
+      long reason=HistoryDealGetInteger(ticket,DEAL_REASON);
+
+      if(emitted>0)
+         result+=",";
+      result+="{";
+      result+="\"deal_ticket\":"+IntegerToString((long)ticket)+",";
+      result+="\"position_id\":"+IntegerToString(HistoryDealGetInteger(ticket,DEAL_POSITION_ID))+",";
+      result+="\"timestamp_utc\":"+IntegerToString(HistoryDealGetInteger(ticket,DEAL_TIME))+",";
+      result+="\"symbol\":"+JsonString(HistoryDealGetString(ticket,DEAL_SYMBOL))+",";
+      result+="\"side\":"+JsonString(side)+",";
+      result+="\"price\":"+DoubleToString(HistoryDealGetDouble(ticket,DEAL_PRICE),10)+",";
+      result+="\"volume\":"+DoubleToString(HistoryDealGetDouble(ticket,DEAL_VOLUME),8)+",";
+      result+="\"profit\":"+DoubleToString(profit,8)+",";
+      result+="\"commission\":"+DoubleToString(commission,8)+",";
+      result+="\"swap\":"+DoubleToString(swap,8)+",";
+      result+="\"fee\":"+DoubleToString(fee,8)+",";
+      result+="\"net_profit\":"+DoubleToString(net_profit,8)+",";
+      result+="\"close_reason\":"+JsonString(CloseReasonName(reason));
+      result+="}";
+      emitted++;
+     }
+
    result+="]";
    return result;
   }
@@ -540,6 +618,7 @@ void WriteSnapshot()
    json+="\"volume_step\":"+DoubleToString(volume_step,8)+",";
    json+="\"trade_tick_size\":"+DoubleToString(tick_size,10)+",";
    json+="\"trade_tick_value_loss\":"+DoubleToString(tick_value_loss,10)+"},";
+   json+="\"closed_trades\":"+BuildClosedDealsJson()+",";
    json+="\"rates\":"+(selected ? BuildRatesJson(symbol) : "[]");
    json+="}";
 
@@ -571,7 +650,7 @@ int OnInit()
 
    WriteSnapshot();
    ProcessTradeCommand();
-   Print("FX2Active bridge v1.22 started. Keep this EA attached to one chart.");
+   Print("FX2Active bridge v1.23 started. Keep this EA attached to one chart.");
    return INIT_SUCCEEDED;
   }
 

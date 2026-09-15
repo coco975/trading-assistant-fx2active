@@ -9,9 +9,10 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
+from .bridge_version import BRIDGE_SOURCE_VERSION
+
 BRIDGE_DIR_NAME = "FX2Active"
 BRIDGE_PROTOCOL_VERSION = 2
-BRIDGE_SOURCE_VERSION = "1.22"
 BRIDGE_SOURCE_FILE = "FX2ActiveBridge.mq5"
 BRIDGE_BINARY_FILE = "FX2ActiveBridge.ex5"
 SNAPSHOT_FILE = "snapshot.json"
@@ -307,10 +308,6 @@ def _find_mql5_dirs(*, force_refresh: bool = False) -> list[Path]:
 
     found: list[Path] = []
 
-    # Current MetaQuotes macOS packages commonly keep MQL5 next to terminal64.exe
-    # under drive_c/Program Files. Older packages may keep it under the hashed
-    # AppData/MetaQuotes/Terminal data folder. Broker-branded Wine prefixes can
-    # use either layout.
     direct_patterns = [
         "drive_c/Program Files/*/MQL5",
         "drive_c/Program Files (x86)/*/MQL5",

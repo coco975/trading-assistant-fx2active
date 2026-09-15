@@ -27,8 +27,10 @@ REQUIRED_PROJECT_FILES = (
     "scripts/run_fx2active.py",
     "src/fx2active_bot/execution_runtime.py",
     "src/fx2active_bot/trade_executor.py",
+    "src/fx2active_bot/trade_log.py",
     "src/fx2active_bot/mac_trade_executor.py",
     "src/fx2active_bot/mac_bridge.py",
+    "src/fx2active_bot/mac_setup.py",
     "web/index.html",
     "web/app.js",
     "web/styles.css",
@@ -74,7 +76,9 @@ def verify_runtime_imports() -> bool:
     modules = (
         "fx2active_bot.runtime_settings",
         "fx2active_bot.trade_executor",
+        "fx2active_bot.trade_log",
         "fx2active_bot.mac_bridge",
+        "fx2active_bot.mac_setup",
         "fx2active_bot.mac_trade_executor",
         "fx2active_bot.execution_runtime",
         "fx2active_bot.web_server",
@@ -96,33 +100,51 @@ def prepare_macos_bridge() -> None:
 
     from fx2active_bot.mac_bridge import (
         BRIDGE_SOURCE_VERSION,
-        bridge_source_needs_compile,
-        install_bridge_source,
         load_snapshot,
         snapshot_age_seconds,
         snapshot_is_fresh,
     )
+    from fx2active_bot.mac_setup import prepare_mac_bridge
 
     source = ROOT / "bridge" / "FX2ActiveBridge.mq5"
+    print("\n--- macOS MetaTrader setup ---")
     try:
-        installed = install_bridge_source(source)
+        report = prepare_mac_bridge(source)
     except Exception as exc:
-        installed = []
-        print(f"[WARN] Automatic MT5 bridge installation check failed: {exc}")
+        print(f"[WARN] Automatic MT5 bridge preparation failed: {exc}")
+        report = None
 
-    if installed:
-        print(f"[OK] Latest FX2ActiveBridge.mq5 v{BRIDGE_SOURCE_VERSION} installed in {len(installed)} MT5 data folder(s).")
-        current_compiled = [path for path in installed if not bridge_source_needs_compile(path)]
-        if current_compiled:
-            print("[OK] A compiled FX2ActiveBridge.ex5 matching the installed source was detected.")
-        else:
-            print("[SETUP] The latest bridge source is installed but needs one MetaEditor compile.")
-            print("  Open MetaEditor > Experts > FX2Active > FX2ActiveBridge.mq5 and press Compile.")
-            print("  Then attach FX2ActiveBridge to one MT5 chart and enable Algo Trading.")
-    else:
-        print("[WARN] A MetaTrader macOS data folder was not detected automatically.")
-        print("  Keep your broker's MT5 app open and run FX2Active again.")
-        print("  The dashboard will still start and show the exact bridge status.")
+    if report is not None:
+        if report.apps:
+            print("[OK] Detected macOS MT5 application(s):")
+            for app in report.apps:
+                print(f"  - {app}")
+        if report.launched_app is not None:
+            print(f"[SETUP] Opened {report.launched_app.name} so its Wine data folder can initialize.")
+        if report.prefixes:
+            print(f"[OK] Detected {len(report.prefixes)} MT5/Wine data prefix(es).")
+        if report.install_roots:
+            print("[OK] Detected MT5 terminal installation root(s):")
+            for install_root in report.install_roots:
+                print(f"  - {install_root}")
+        if report.installed_sources:
+            print(
+                f"[OK] FX2Active created/updated the Experts/FX2Active folder and installed "
+                f"bridge v{BRIDGE_SOURCE_VERSION} in {len(report.installed_sources)} location(s)."
+            )
+            for installed in report.installed_sources:
+                print(f"  - {installed}")
+        if report.compiled_sources:
+            print(
+                f"[OK] MetaEditor compilation is current for {len(report.compiled_sources)} "
+                "FX2Active bridge installation(s)."
+            )
+        elif report.installed_sources:
+            print("[SETUP] Bridge source installation is complete, but automatic MetaEditor compilation did not finish.")
+            print("  FX2Active already created the folder and copied the file; do not create anything manually.")
+            print("  Open MetaEditor > Experts > FX2Active > FX2ActiveBridge.mq5 and press Compile once.")
+        for warning in report.warnings:
+            print(f"[WARN] {warning}")
 
     try:
         snapshot, path = load_snapshot()
@@ -134,12 +156,13 @@ def prepare_macos_bridge() -> None:
             if version != BRIDGE_SOURCE_VERSION or not execution_capable:
                 print(
                     f"[SETUP] The attached EA is not the current execution bridge v{BRIDGE_SOURCE_VERSION}. "
-                    "Compile and attach the latest FX2ActiveBridge before enabling order execution."
+                    "FX2Active has updated the source; use the compiled current bridge before execution."
                 )
         else:
             print("[WARN] An MT5 bridge snapshot exists but is not updating yet.")
     except Exception as exc:
         print(f"[WARN] macOS MT5 bridge is not live yet: {exc}")
+        print("  If this is the first setup, attach FX2ActiveBridge to one MT5 chart and enable Algo Trading once.")
 
 
 def main() -> int:
@@ -172,6 +195,7 @@ def main() -> int:
     access_mode = os.environ.get("FX2ACTIVE_ACCESS_MODE", "local").strip().lower()
     host = "0.0.0.0" if access_mode == "lan" else "127.0.0.1"
 
+    # RuntimeSettingsStore moves mutable values to data/runtime automatically.
     settings_path = ROOT / "config" / "runtime_settings.json"
     try:
         report = run_diagnostics(
@@ -201,9 +225,10 @@ def main() -> int:
     if not report["ready"]:
         print("\n[WARN] The dashboard will start, but MT5/execution is not fully ready yet.")
         if platform.system() == "Darwin":
-            print("Finish the FX2ActiveBridge step in MT5, then use Run system check in the dashboard.")
+            print("FX2Active has already handled folder/source setup where possible.")
+            print("If the EA has never been attached before, attach it once and enable Algo Trading, then run System Check.")
         else:
-            print("Open/connect MT5 and enable trading access, then use Run system check in the dashboard.")
+            print("Open/connect MT5 and enable trading access, then use System Check in the dashboard.")
 
     print("\n[OK] Startup preflight completed. Starting FX2Active worker + dashboard...")
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "run_fx2active.py")])

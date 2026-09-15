@@ -29,7 +29,7 @@ def execution_settings(**overrides):
     return RuntimeSettings(**values)
 
 
-def bridge_snapshot(*, trade_mode=0, trade_allowed=True, trade_expert=True, version="1.22"):
+def bridge_snapshot(*, trade_mode=0, trade_allowed=True, trade_expert=True, version="1.23"):
     return {
         "bridge_version": version,
         "execution_bridge": True,
@@ -142,7 +142,7 @@ def test_mac_executor_blocks_outdated_execution_bridge(tmp_path):
         timeout_seconds=0.01,
     )
     assert result.status == "blocked"
-    assert "v1.22" in result.message
+    assert "v1.23" in result.message
     assert not (tmp_path / "order_command.txt").exists()
 
 
