@@ -112,7 +112,6 @@ def _shallow_application_support_prefixes() -> list[Path]:
             if (child / "drive_c").is_dir():
                 found.append(child)
                 continue
-            # Old broker wrappers commonly keep Wine prefixes one or two levels down.
             for nested in child.iterdir():
                 if nested.is_dir() and (nested / "drive_c").is_dir():
                     found.append(nested)
@@ -188,8 +187,6 @@ def _copy_bridge_to_install_root(source: Path, install_root: Path) -> Path:
 
 def _wine_launchers(apps: list[Path]) -> list[Path]:
     found: list[Path] = []
-
-    # The official web-installed package uses Contents/SharedSupport/wine/bin/wine64.
     relative_candidates = (
         "Contents/SharedSupport/wine/bin/wine64",
         "Contents/SharedSupport/wine/bin/wine",
@@ -209,8 +206,6 @@ def _wine_launchers(apps: list[Path]) -> list[Path]:
             if candidate not in found:
                 found.append(candidate)
 
-    # A broker-branded package may expose a different bundle path. Reuse the
-    # Wine executable visible in the live MT5 command line when available.
     for line in _process_table().splitlines():
         if "terminal64.exe" not in line.lower() and "metaeditor64.exe" not in line.lower():
             continue
@@ -247,6 +242,19 @@ def _metaeditor_for_source(source: Path) -> Path | None:
     return None
 
 
+def _metaeditor_for_prefix(prefix: Path) -> Path | None:
+    """Find MetaEditor when source lives in a separate hashed AppData data folder."""
+
+    for install_root in discover_mt5_install_roots(force_refresh=True):
+        if _prefix_for_path(install_root, [prefix]) is None:
+            continue
+        for name in ("metaeditor64.exe", "metaeditor.exe"):
+            candidate = install_root / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
 def try_compile_bridge_source(
     source: Path,
     *,
@@ -262,9 +270,9 @@ def try_compile_bridge_source(
     prefix = _prefix_for_path(source, prefixes)
     if prefix is None:
         return False, "could not match bridge source to a Wine prefix"
-    metaeditor = _metaeditor_for_source(source)
+    metaeditor = _metaeditor_for_source(source) or _metaeditor_for_prefix(prefix)
     if metaeditor is None:
-        return False, "metaeditor64.exe was not found beside the MT5 installation"
+        return False, "metaeditor64.exe was not found in the detected MT5 Wine prefix"
     windows_source = _windows_path(source, prefix)
     if windows_source is None:
         return False, "could not convert bridge path for MetaEditor"
@@ -293,7 +301,6 @@ def try_compile_bridge_source(
     except (OSError, subprocess.SubprocessError) as exc:
         return False, f"automatic MetaEditor compile could not start: {exc}"
 
-    compiled = source.with_suffix(".ex5")
     deadline = time.monotonic() + 10.0
     while time.monotonic() < deadline:
         if not mac_bridge.bridge_source_needs_compile(source):
@@ -311,6 +318,18 @@ def try_compile_bridge_source(
     return False, "MetaEditor ran but a current FX2ActiveBridge.ex5 was not produced"
 
 
+def _refresh_after_launch(report: MacBridgeSetupReport) -> None:
+    """Wait briefly for a newly opened web-installed MT5 to initialize its Wine tree."""
+
+    for _ in range(8):
+        time.sleep(1.0)
+        mac_bridge.clear_prefix_cache()
+        report.prefixes = discover_wine_prefixes(force_refresh=True)
+        report.install_roots = discover_mt5_install_roots(force_refresh=True)
+        if report.install_roots:
+            return
+
+
 def prepare_mac_bridge(source: str | Path) -> MacBridgeSetupReport:
     """Discover a web-installed MT5, create bridge folders, copy and compile source."""
 
@@ -321,20 +340,15 @@ def prepare_mac_bridge(source: str | Path) -> MacBridgeSetupReport:
     report = MacBridgeSetupReport()
     report.apps = find_mt5_apps()
     report.prefixes = discover_wine_prefixes(force_refresh=True)
+    report.install_roots = discover_mt5_install_roots(force_refresh=True)
 
-    # The official browser installer creates the Wine prefix after the app has
-    # been opened. If exactly one MT5 app is installed, start it automatically.
-    if not report.prefixes and report.apps:
+    # A browser-installed package may exist before its Wine tree is fully built.
+    # If exactly one MT5 app is installed, opening it is unambiguous and lets the
+    # package initialize its own data directories without sudo or manual folders.
+    if not report.install_roots and len(report.apps) == 1 and not mt5_is_running():
         report.launched_app = launch_single_detected_mt5_app(report.apps)
         if report.launched_app is not None:
-            for _ in range(8):
-                time.sleep(1.0)
-                mac_bridge.clear_prefix_cache()
-                report.prefixes = discover_wine_prefixes(force_refresh=True)
-                if report.prefixes:
-                    break
-
-    report.install_roots = discover_mt5_install_roots(force_refresh=True)
+            _refresh_after_launch(report)
 
     installed: list[Path] = []
     for install_root in report.install_roots:
@@ -350,8 +364,6 @@ def prepare_mac_bridge(source: str | Path) -> MacBridgeSetupReport:
         except OSError as exc:
             report.warnings.append(f"Could not prepare {install_root}: {exc}")
 
-    # Preserve support for older AppData/hashed-terminal layouts already handled
-    # by mac_bridge.install_bridge_source().
     try:
         for target in mac_bridge.install_bridge_source(source_path):
             if target not in installed:
