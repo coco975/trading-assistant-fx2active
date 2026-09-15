@@ -10,7 +10,7 @@ from typing import Any
 
 
 class TradeLogStore:
-    """Persistent local history of detected setups and execution results."""
+    """Persistent local history of detected setups, execution and closed trades."""
 
     def __init__(self, path: str | Path, *, max_entries: int = 250) -> None:
         self.path = Path(path)
@@ -54,18 +54,20 @@ class TradeLogStore:
         with self._lock:
             self._save_unlocked([])
 
-    def _append_unlocked(self, items: list[dict[str, Any]], event: dict[str, Any]) -> bool:
-        event_key = str(event.get("event_key", ""))
-        if event_key and any(str(item.get("event_key", "")) == event_key for item in items):
-            return False
-        record = dict(event)
-        record.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
-        items.append(record)
-        self._save_unlocked(items)
-        return True
+    @staticmethod
+    def _profit_status(value: Any) -> str:
+        try:
+            net = float(value)
+        except (TypeError, ValueError):
+            return "Closed"
+        if net > 1e-9:
+            return "Profit"
+        if net < -1e-9:
+            return "Loss"
+        return "Breakeven"
 
     def capture_status(self, status: dict[str, Any]) -> None:
-        """Record new setup/execution events from the runtime status payload."""
+        """Record new setup, execution and broker-close events from runtime status."""
 
         if not isinstance(status, dict):
             return
@@ -77,6 +79,9 @@ class TradeLogStore:
             if isinstance(status.get("execution_result"), dict)
             else None
         )
+        closed_trades = status.get("closed_trades")
+        if not isinstance(closed_trades, list):
+            closed_trades = []
 
         pending: list[dict[str, Any]] = []
         if setup:
@@ -87,6 +92,8 @@ class TradeLogStore:
                     str(setup.get("side") or ""),
                     str(setup.get("swing_high") or ""),
                     str(setup.get("swing_low") or ""),
+                    str(setup.get("swing_high_time") or ""),
+                    str(setup.get("swing_low_time") or ""),
                     str(setup.get("entry") or ""),
                 )
             )
@@ -127,8 +134,12 @@ class TradeLogStore:
                         "event": "Execution",
                         "symbol": symbol,
                         "side": setup.get("side") if setup else None,
-                        "price": execution.get("price") if execution.get("price") is not None else (setup.get("entry") if setup else None),
-                        "volume": execution.get("volume") if execution.get("volume") is not None else (setup.get("planned_volume") if setup else None),
+                        "price": execution.get("price")
+                        if execution.get("price") is not None
+                        else (setup.get("entry") if setup else None),
+                        "volume": execution.get("volume")
+                        if execution.get("volume") is not None
+                        else (setup.get("planned_volume") if setup else None),
                         "status": execution.get("status") or "Result",
                         "message": execution.get("message"),
                         "retcode": execution.get("retcode"),
@@ -137,18 +148,50 @@ class TradeLogStore:
                     }
                 )
 
+        for closed in closed_trades:
+            if not isinstance(closed, dict):
+                continue
+            deal_ticket = closed.get("deal_ticket")
+            position_id = closed.get("position_id")
+            closed_at = closed.get("timestamp_utc") or timestamp
+            key_suffix = deal_ticket or f"{position_id}|{closed_at}|{closed.get('price')}"
+            net_profit = closed.get("net_profit")
+            pending.append(
+                {
+                    "event_key": f"closed|{key_suffix}",
+                    "timestamp_utc": str(closed_at),
+                    "event": "Closed",
+                    "symbol": closed.get("symbol") or symbol,
+                    "side": closed.get("side"),
+                    "price": closed.get("price"),
+                    "volume": closed.get("volume"),
+                    "status": self._profit_status(net_profit),
+                    "profit": closed.get("profit"),
+                    "commission": closed.get("commission"),
+                    "swap": closed.get("swap"),
+                    "fee": closed.get("fee"),
+                    "net_profit": net_profit,
+                    "close_reason": closed.get("close_reason"),
+                    "deal_ticket": deal_ticket,
+                    "position_id": position_id,
+                }
+            )
+
         if not pending:
             return
         with self._lock:
             items = self._load_unlocked()
+            existing_keys = {str(item.get("event_key", "")) for item in items}
             changed = False
             for event in pending:
                 event_key = str(event.get("event_key", ""))
-                if event_key and any(str(item.get("event_key", "")) == event_key for item in items):
+                if event_key and event_key in existing_keys:
                     continue
                 record = dict(event)
                 record.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
                 items.append(record)
+                if event_key:
+                    existing_keys.add(event_key)
                 changed = True
             if changed:
                 self._save_unlocked(items)
