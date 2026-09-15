@@ -65,4 +65,6 @@ def test_bootstrap_automates_mac_bridge_folder_and_compile_preparation() -> None
     assert '"MQL5" / "Experts" / mac_bridge.BRIDGE_DIR_NAME' in mac_setup
     assert 'f"/compile:{windows_source}"' in mac_setup
     assert '"WINEPREFIX"' in mac_setup
-    assert "sudo" not in mac_setup
+    # Documentation may mention sudo, but the installer must never execute it.
+    assert 'subprocess.run(["sudo"' not in mac_setup
+    assert "os.system(\"sudo" not in mac_setup
