@@ -73,7 +73,9 @@ class ExecutionStateStore:
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True)
+                # Preserve insertion order so bounded-state pruning removes the
+                # oldest processed fingerprints rather than lexical key order.
+                json.dump(payload, handle, indent=2)
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -249,6 +251,13 @@ class WindowsTradeExecutor:
             )
         if not bool(getattr(account, "trade_allowed", False)):
             return ExecutionResult(False, "blocked", "MT5 account trading is not allowed.", fingerprint)
+        if not bool(getattr(account, "trade_expert", True)):
+            return ExecutionResult(
+                False,
+                "blocked",
+                "MT5 account does not allow Expert Advisor/Python automated trading.",
+                fingerprint,
+            )
 
         positions, pending_orders = count_bot_exposure(mt5)
         if positions + pending_orders >= settings.max_open_positions:
