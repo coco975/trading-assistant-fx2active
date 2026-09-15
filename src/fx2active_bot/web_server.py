@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 from .runtime_settings import RuntimeSettings, RuntimeSettingsStore
 from .system_diagnostics import run_diagnostics, save_report
+from .trade_log import TradeLogStore
 
 
 SESSION_COOKIE = "fx2active_session"
@@ -86,6 +87,7 @@ class ControlPanelServer:
         web_root: str | Path,
         status_path: str | Path | None = None,
         diagnostics_path: str | Path | None = None,
+        trade_log_path: str | Path | None = None,
         host: str = "127.0.0.1",
         port: int = 8080,
         dashboard_pin: str | None = None,
@@ -96,6 +98,13 @@ class ControlPanelServer:
         self.web_root = Path(web_root)
         self.status_path = Path(status_path) if status_path else None
         self.diagnostics_path = Path(diagnostics_path) if diagnostics_path else None
+        if trade_log_path is not None:
+            resolved_trade_log = Path(trade_log_path)
+        elif self.status_path is not None:
+            resolved_trade_log = self.status_path.parent / "trade_log.json"
+        else:
+            resolved_trade_log = None
+        self.trade_log = TradeLogStore(resolved_trade_log) if resolved_trade_log else None
         self.host = host
         self.port = port
         self.dashboard_pin = dashboard_pin
@@ -108,6 +117,7 @@ class ControlPanelServer:
         web_root = self.web_root
         status_path = self.status_path
         diagnostics_path = self.diagnostics_path
+        trade_log = self.trade_log
         host = self.host
         port = self.port
         dashboard_pin = self.dashboard_pin
@@ -238,17 +248,30 @@ class ControlPanelServer:
                     self._json(HTTPStatus.OK, store.load().to_dict())
                     return
                 if path == "/api/system/status":
-                    self._json(
-                        HTTPStatus.OK,
-                        self._load_json_file(
-                            status_path,
-                            {
-                                "worker_online": False,
-                                "mt5_connected": False,
-                                "message": "Waiting for local worker status...",
-                            },
-                        ),
+                    status_payload = self._load_json_file(
+                        status_path,
+                        {
+                            "worker_online": False,
+                            "mt5_connected": False,
+                            "message": "Waiting for local system status...",
+                        },
                     )
+                    if trade_log is not None:
+                        try:
+                            trade_log.capture_status(status_payload)
+                        except (OSError, RuntimeError, TypeError, ValueError):
+                            pass
+                    self._json(HTTPStatus.OK, status_payload)
+                    return
+                if path == "/api/trade-log":
+                    if trade_log is None:
+                        self._json(HTTPStatus.OK, {"events": []})
+                        return
+                    try:
+                        events = trade_log.read(limit=100)
+                    except (OSError, RuntimeError, TypeError, ValueError):
+                        events = []
+                    self._json(HTTPStatus.OK, {"events": events})
                     return
                 if path == "/api/system/diagnostics":
                     self._json(
@@ -316,6 +339,19 @@ class ControlPanelServer:
                             HTTPStatus.INTERNAL_SERVER_ERROR,
                             {"ready": False, "checks": [], "error": str(exc)},
                         )
+                    return
+
+                if path == "/api/trade-log/clear":
+                    if trade_log is not None:
+                        try:
+                            trade_log.clear()
+                        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                            self._json(
+                                HTTPStatus.INTERNAL_SERVER_ERROR,
+                                {"ok": False, "error": str(exc)},
+                            )
+                            return
+                    self._json(HTTPStatus.OK, {"ok": True})
                     return
 
                 if path != "/api/settings":
