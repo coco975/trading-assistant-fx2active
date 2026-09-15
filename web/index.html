@@ -30,6 +30,31 @@
     <p id="system-message" class="system-message">Starting FX2Active…</p>
 
     <section class="grid">
+      <article class="card wide live-setup-card">
+        <div class="card-head">
+          <div>
+            <h2>Current Fibonacci Setup</h2>
+            <p id="fib-status" class="muted">Waiting for a qualifying setup.</p>
+          </div>
+          <span id="fib-side" class="setup-badge neutral">—</span>
+        </div>
+        <div id="fib-content" class="hidden">
+          <div class="setup-summary">
+            <div><small>Structure</small><strong id="fib-path">—</strong></div>
+            <div><small>Swing High</small><strong id="fib-swing-high">—</strong><span id="fib-swing-high-time">—</span></div>
+            <div><small>78.6% Entry</small><strong id="fib-entry">—</strong></div>
+            <div><small>Swing Low</small><strong id="fib-swing-low">—</strong><span id="fib-swing-low-time">—</span></div>
+            <div><small>Stop Loss</small><strong id="fib-stop">—</strong></div>
+            <div><small>Take Profit</small><strong id="fib-target">—</strong></div>
+            <div><small>Reward / Risk</small><strong id="fib-rr">—</strong></div>
+          </div>
+          <div class="fib-ladder-wrap">
+            <div class="section-label">Fib Levels</div>
+            <div id="fib-levels" class="fib-ladder"></div>
+          </div>
+        </div>
+      </article>
+
       <article class="card">
         <h2>78.6% Fibonacci</h2>
         <label class="switch-row"><span><strong>Fibonacci Entry</strong><small>BUY: low → high • SELL: high → low</small></span><input id="fib_enabled" type="checkbox"><span class="switch"></span></label>
@@ -84,6 +109,15 @@
           <label class="toggle-card"><input id="psychological_level" type="checkbox"><span><strong>Psychological Level</strong><small>Round-number price area</small></span></label>
           <label class="toggle-card"><input id="candle_confirmation" type="checkbox"><span><strong>Candle Confirmation</strong><small>Bullish for BUY • bearish for SELL</small></span></label>
         </div>
+      </article>
+
+      <article class="card wide trade-log-card">
+        <div class="card-head">
+          <div><h2>Trade Log</h2><p class="muted">Recent setups and MT5 execution results.</p></div>
+          <button id="clear-trade-log" class="secondary" type="button">Clear</button>
+        </div>
+        <div class="trade-log-head"><span>Time</span><span>Symbol</span><span>Event</span><span>Side</span><span>Price</span><span>Volume</span><span>Status</span></div>
+        <div id="trade-log-list" class="trade-log-list"><div class="empty-state">No trade activity recorded yet.</div></div>
       </article>
 
       <article id="diagnostic-card" class="card wide diagnostic-card hidden">
