@@ -29,10 +29,16 @@ def execution_settings(**overrides):
     return RuntimeSettings(**values)
 
 
-def bridge_snapshot(*, trade_mode=0, trade_allowed=True):
+def bridge_snapshot(*, trade_mode=0, trade_allowed=True, trade_expert=True, version="1.22"):
     return {
+        "bridge_version": version,
+        "execution_bridge": True,
         "terminal": {"connected": True, "trade_allowed": trade_allowed},
-        "account": {"trade_mode": trade_mode, "trade_allowed": trade_allowed},
+        "account": {
+            "trade_mode": trade_mode,
+            "trade_allowed": trade_allowed,
+            "trade_expert": trade_expert,
+        },
         "fx2active_open_positions": 0,
         "fx2active_pending_orders": 0,
         "symbol": {"bid": 2500.0, "ask": 2500.1, "point": 0.01, "digits": 2},
@@ -53,6 +59,7 @@ def test_order_command_contains_execution_safety_fields(tmp_path):
             "tp": 2520.0,
             "deviation": 20,
             "max_spread_pips": 15.0,
+            "max_exposure": 3,
             "allow_live": False,
         },
     )
@@ -62,6 +69,7 @@ def test_order_command_contains_execution_safety_fields(tmp_path):
     assert "magic=26091501" in text
     assert "allow_live=0" in text
     assert "max_spread_pips=15.0000" in text
+    assert "max_exposure=3" in text
 
 
 def test_result_reader_requires_matching_command_id(tmp_path):
@@ -122,6 +130,22 @@ def test_mac_executor_consumes_successful_bridge_ack(tmp_path):
     assert second.status == "duplicate"
 
 
+def test_mac_executor_blocks_outdated_execution_bridge(tmp_path):
+    executor = MacTradeExecutor(state_path=tmp_path / "state.json")
+    result = executor.execute(
+        settings=execution_settings(),
+        symbol="XAUUSDm",
+        setup=trade_setup(),
+        volume=0.01,
+        snapshot=bridge_snapshot(version="1.21"),
+        snapshot_path=tmp_path / "snapshot.json",
+        timeout_seconds=0.01,
+    )
+    assert result.status == "blocked"
+    assert "v1.22" in result.message
+    assert not (tmp_path / "order_command.txt").exists()
+
+
 def test_mac_executor_blocks_real_account_without_live_arm(tmp_path):
     settings = execution_settings(allow_live_account=False)
     executor = MacTradeExecutor(state_path=tmp_path / "state.json")
@@ -153,6 +177,21 @@ def test_mac_executor_blocks_when_algo_trading_is_off(tmp_path):
     assert not (tmp_path / "order_command.txt").exists()
 
 
+def test_mac_executor_blocks_when_expert_trading_permission_is_off(tmp_path):
+    executor = MacTradeExecutor(state_path=tmp_path / "state.json")
+    result = executor.execute(
+        settings=execution_settings(),
+        symbol="XAUUSDm",
+        setup=trade_setup(),
+        volume=0.01,
+        snapshot=bridge_snapshot(trade_expert=False),
+        snapshot_path=tmp_path / "snapshot.json",
+        timeout_seconds=0.01,
+    )
+    assert result.status == "blocked"
+    assert not (tmp_path / "order_command.txt").exists()
+
+
 def test_bridge_block_result_is_retryable_not_persisted(tmp_path):
     snapshot_path = tmp_path / "snapshot.json"
     snapshot_path.write_text("{}", encoding="utf-8")
@@ -173,8 +212,6 @@ def test_bridge_block_result_is_retryable_not_persisted(tmp_path):
     )
 
     executor = MacTradeExecutor(state_path=tmp_path / "state.json")
-    # The stale blocked result is discarded and a fresh command is issued. With
-    # no bridge in this unit test, that new command times out and becomes ambiguous.
     result = executor.execute(
         settings=settings,
         symbol="XAUUSDm",
