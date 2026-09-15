@@ -25,6 +25,10 @@ REQUIRED_PROJECT_FILES = (
     "config/runtime_settings.json",
     "bridge/FX2ActiveBridge.mq5",
     "scripts/run_fx2active.py",
+    "src/fx2active_bot/execution_runtime.py",
+    "src/fx2active_bot/trade_executor.py",
+    "src/fx2active_bot/mac_trade_executor.py",
+    "src/fx2active_bot/mac_bridge.py",
     "web/index.html",
     "web/app.js",
     "web/styles.css",
@@ -39,17 +43,12 @@ def verify_project_layout() -> bool:
             print(f"  - {relative}")
         print("Run git pull again or clone a fresh copy of the repository.")
         return False
-    print("[OK] FX2Active project files are complete.")
+    print("[OK] FX2Active project files are complete, including the execution layer.")
     return True
 
 
 def ensure_python_packages() -> None:
-    """Install only the external runtime package that Windows actually needs.
-
-    The repository itself is imported directly from src/, so macOS can start
-    offline once Python is present. Windows needs MetaTrader5 for direct terminal
-    IPC; install it into the private .venv automatically when missing.
-    """
+    """Install only the external runtime package that Windows actually needs."""
 
     if platform.system() != "Windows":
         print("[OK] No external Python runtime packages are required on macOS.")
@@ -74,6 +73,7 @@ def prepare_macos_bridge() -> None:
         return
 
     from fx2active_bot.mac_bridge import (
+        BRIDGE_SOURCE_VERSION,
         bridge_source_needs_compile,
         install_bridge_source,
         load_snapshot,
@@ -89,7 +89,7 @@ def prepare_macos_bridge() -> None:
         print(f"[WARN] Automatic MT5 bridge installation check failed: {exc}")
 
     if installed:
-        print(f"[OK] Latest FX2ActiveBridge.mq5 installed in {len(installed)} MT5 data folder(s).")
+        print(f"[OK] Latest FX2ActiveBridge.mq5 v{BRIDGE_SOURCE_VERSION} installed in {len(installed)} MT5 data folder(s).")
         current_compiled = [path for path in installed if not bridge_source_needs_compile(path)]
         if current_compiled:
             print("[OK] A compiled FX2ActiveBridge.ex5 matching the installed source was detected.")
@@ -106,7 +106,14 @@ def prepare_macos_bridge() -> None:
         snapshot, path = load_snapshot()
         if snapshot_is_fresh(snapshot):
             age = snapshot_age_seconds(snapshot)
-            print(f"[OK] Live macOS MT5 bridge detected at {path} ({age:.1f}s old).")
+            version = snapshot.get("bridge_version", "unknown")
+            execution_capable = bool(snapshot.get("execution_bridge"))
+            print(f"[OK] Live macOS MT5 bridge detected at {path} ({age:.1f}s old, v{version}).")
+            if version != BRIDGE_SOURCE_VERSION or not execution_capable:
+                print(
+                    f"[SETUP] The attached EA is not the current execution bridge v{BRIDGE_SOURCE_VERSION}. "
+                    "Compile and attach the latest FX2ActiveBridge before enabling order execution."
+                )
         else:
             print("[WARN] An MT5 bridge snapshot exists but is not updating yet.")
     except Exception as exc:
@@ -167,11 +174,11 @@ def main() -> int:
         return 1
 
     if not report["ready"]:
-        print("\n[WARN] The dashboard will start, but MT5 is not fully ready yet.")
+        print("\n[WARN] The dashboard will start, but MT5/execution is not fully ready yet.")
         if platform.system() == "Darwin":
             print("Finish the FX2ActiveBridge step in MT5, then use Run system check in the dashboard.")
         else:
-            print("Open/connect MT5, then use Run system check in the dashboard.")
+            print("Open/connect MT5 and enable trading access, then use Run system check in the dashboard.")
 
     print("\n[OK] Startup preflight completed. Starting FX2Active worker + dashboard...")
     return subprocess.call([sys.executable, str(ROOT / "scripts" / "run_fx2active.py")])
