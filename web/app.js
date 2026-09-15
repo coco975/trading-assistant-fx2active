@@ -7,6 +7,8 @@ const ids = [
   'candle_confirmation','min_confirmations'
 ];
 
+const TRADE_LOG_KEY = 'fx2active_trade_log_v1';
+const TRADE_LOG_LIMIT = 100;
 const $ = (id) => document.getElementById(id);
 const status = $('status');
 const dot = $('status-dot');
@@ -18,6 +20,24 @@ function mark(message, kind='ok') {
 
 function setHealth(id, ok) {
   $(id).dataset.state = ok ? 'ok' : 'error';
+}
+
+function formatPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  const absolute = Math.abs(number);
+  if (absolute >= 1000) return number.toFixed(2);
+  if (absolute >= 10) return number.toFixed(3);
+  return number.toFixed(5);
+}
+
+function formatTime(value) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  return date.toLocaleString([], {
+    day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit'
+  });
 }
 
 function updateSizingFields() {
@@ -98,6 +118,170 @@ function getForm() {
   };
 }
 
+function fibPrice(setup, percentage) {
+  const high = Number(setup.swing_high);
+  const low = Number(setup.swing_low);
+  const ratio = Number(percentage) / 100;
+  if (!Number.isFinite(high) || !Number.isFinite(low) || high <= low) return null;
+  return String(setup.side).toUpperCase() === 'SELL'
+    ? low + ((high - low) * ratio)
+    : high - ((high - low) * ratio);
+}
+
+function renderFibSetup(setup, symbol='') {
+  const content = $('fib-content');
+  const sideBadge = $('fib-side');
+  if (!setup) {
+    content.classList.add('hidden');
+    $('fib-status').textContent = 'Waiting for a qualifying setup.';
+    sideBadge.textContent = '—';
+    sideBadge.className = 'setup-badge neutral';
+    return;
+  }
+
+  const side = String(setup.side || '').toUpperCase();
+  const buy = side === 'BUY';
+  sideBadge.textContent = side || 'SETUP';
+  sideBadge.className = `setup-badge ${buy ? 'buy' : 'sell'}`;
+  $('fib-status').textContent = `${symbol || 'Symbol'} • M15 • live setup map`;
+  $('fib-path').textContent = buy ? 'Swing Low → Swing High' : 'Swing High → Swing Low';
+  $('fib-swing-high').textContent = formatPrice(setup.swing_high);
+  $('fib-swing-low').textContent = formatPrice(setup.swing_low);
+  $('fib-entry').textContent = formatPrice(setup.entry);
+  $('fib-stop').textContent = formatPrice(setup.stop_loss);
+  $('fib-target').textContent = formatPrice(setup.take_profit);
+  $('fib-rr').textContent = Number.isFinite(Number(setup.reward_to_risk))
+    ? `${Number(setup.reward_to_risk).toFixed(2)}R`
+    : '—';
+  $('fib-swing-high-time').textContent = setup.swing_high_time ? formatTime(setup.swing_high_time) : '';
+  $('fib-swing-low-time').textContent = setup.swing_low_time ? formatTime(setup.swing_low_time) : '';
+
+  const configured = Number($('fib_retracement').value || 0.786) * 100;
+  const rawLevels = [0, 23.6, 38.2, 50, 61.8, 71, configured, 78.6, 100];
+  const uniqueLevels = [...new Set(rawLevels.map((value) => Number(value.toFixed(1))))];
+  const levels = uniqueLevels.map((percentage) => ({
+    percentage,
+    price: fibPrice(setup, percentage)
+  })).filter((item) => Number.isFinite(item.price)).sort((a, b) => b.price - a.price);
+
+  const ladder = $('fib-levels');
+  ladder.innerHTML = '';
+  levels.forEach((level) => {
+    const row = document.createElement('div');
+    const isEntry = Math.abs(level.percentage - configured) < 0.11;
+    const isHigh = Math.abs(level.price - Number(setup.swing_high)) < 1e-9;
+    const isLow = Math.abs(level.price - Number(setup.swing_low)) < 1e-9;
+    row.className = `fib-level${isEntry ? ' entry' : ''}${isHigh || isLow ? ' swing' : ''}`;
+
+    const label = document.createElement('span');
+    if (isHigh) label.textContent = `Swing High • ${level.percentage}%`;
+    else if (isLow) label.textContent = `Swing Low • ${level.percentage}%`;
+    else if (isEntry) label.textContent = `Entry • ${level.percentage}%`;
+    else label.textContent = `${level.percentage}%`;
+
+    const price = document.createElement('strong');
+    price.textContent = formatPrice(level.price);
+    row.append(label, price);
+    ladder.append(row);
+  });
+  content.classList.remove('hidden');
+}
+
+function readTradeLog() {
+  try {
+    const value = JSON.parse(localStorage.getItem(TRADE_LOG_KEY) || '[]');
+    return Array.isArray(value) ? value : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function writeTradeLog(events) {
+  try {
+    localStorage.setItem(TRADE_LOG_KEY, JSON.stringify(events.slice(0, TRADE_LOG_LIMIT)));
+  } catch (_) {
+    // Dashboard status continues even if browser storage is unavailable.
+  }
+}
+
+function addTradeEvent(event) {
+  const events = readTradeLog();
+  if (events.some((item) => item.key === event.key)) return;
+  events.unshift(event);
+  writeTradeLog(events);
+  renderTradeLog(events);
+}
+
+function renderTradeLog(events=readTradeLog()) {
+  const list = $('trade-log-list');
+  list.innerHTML = '';
+  if (!events.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No trade activity recorded yet.';
+    list.append(empty);
+    return;
+  }
+
+  events.slice(0, 50).forEach((event) => {
+    const row = document.createElement('div');
+    row.className = 'trade-log-row';
+
+    const fields = [
+      formatTime(event.time),
+      event.symbol || '—',
+      event.event || '—',
+      event.side || '—',
+      event.price == null ? '—' : formatPrice(event.price),
+      event.volume == null ? '—' : Number(event.volume).toFixed(2),
+      event.status || '—'
+    ];
+    fields.forEach((value, index) => {
+      const cell = document.createElement(index === 6 ? 'strong' : 'span');
+      cell.textContent = value;
+      if (index === 6) cell.className = `log-status ${String(event.status || '').toLowerCase()}`;
+      row.append(cell);
+    });
+    list.append(row);
+  });
+}
+
+function captureTradeActivity(systemStatus) {
+  const setup = systemStatus.last_setup;
+  if (setup) {
+    const setupKey = [
+      'setup', systemStatus.symbol, setup.side, setup.swing_high, setup.swing_low, setup.entry
+    ].join('|');
+    addTradeEvent({
+      key: setupKey,
+      time: systemStatus.heartbeat_at || new Date().toISOString(),
+      symbol: systemStatus.symbol,
+      event: 'Setup',
+      side: setup.side,
+      price: setup.entry,
+      volume: setup.planned_volume,
+      status: 'Detected'
+    });
+  }
+
+  const result = systemStatus.execution_result;
+  if (result && !['disabled', 'duplicate'].includes(String(result.status || '').toLowerCase())) {
+    const executionKey = [
+      'execution', result.fingerprint, result.status, result.order_ticket || '', result.deal_ticket || '', result.retcode || ''
+    ].join('|');
+    addTradeEvent({
+      key: executionKey,
+      time: systemStatus.heartbeat_at || new Date().toISOString(),
+      symbol: systemStatus.symbol,
+      event: 'Execution',
+      side: setup?.side || '—',
+      price: result.price ?? setup?.entry ?? null,
+      volume: result.volume ?? setup?.planned_volume ?? null,
+      status: String(result.status || 'Result').replaceAll('_', ' ')
+    });
+  }
+}
+
 async function loadSettings() {
   try {
     const r = await fetch('/api/settings', {cache:'no-store'});
@@ -133,6 +317,9 @@ async function loadSystemStatus() {
       $('position-text').textContent = `${s.open_positions} position(s) + ${pending} pending / ${s.max_open_positions}`;
     }
 
+    renderFibSetup(s.last_setup, s.symbol);
+    captureTradeActivity(s);
+
     let message = s.message || 'FX2Active running';
     if (s.execution_result?.order_ticket) {
       message += ` Order #${s.execution_result.order_ticket}`;
@@ -148,6 +335,7 @@ async function loadSystemStatus() {
     $('mt5-text').textContent = 'Unavailable';
     $('account-text').textContent = 'Unavailable';
     $('system-message').textContent = `Status error: ${e.message}`;
+    renderFibSetup(null);
   }
 }
 
@@ -219,7 +407,11 @@ $('execution_mode').addEventListener('change', updateExecutionHelp);
 $('apply').addEventListener('click', apply);
 $('diagnose').addEventListener('click', diagnose);
 $('close-diagnostics').addEventListener('click', () => $('diagnostic-card').classList.add('hidden'));
+$('clear-trade-log').addEventListener('click', () => {
+  writeTradeLog([]);
+  renderTradeLog([]);
+});
 
-loadSettings();
-loadSystemStatus();
+renderTradeLog();
+loadSettings().then(loadSystemStatus);
 setInterval(loadSystemStatus, 3000);
