@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.20"
+#property version   "1.21"
 #property description "FX2Active local bridge for macOS MetaTrader 5"
 #property description "Attach this EA to one chart and keep Algo Trading enabled."
 
@@ -7,7 +7,7 @@
 #define FX2ACTIVE_ORDER_PROTOCOL 1
 #define FX2ACTIVE_MAGIC 26091501
 
-string BridgeVersion = "1.20";
+string BridgeVersion = "1.21";
 string BridgeFolder = "FX2Active";
 string SnapshotFile = "FX2Active\\snapshot.json";
 string SnapshotTempFile = "FX2Active\\snapshot.tmp";
@@ -205,9 +205,9 @@ void PublishOrderResult(string command_id,
       Print("FX2Active bridge could not publish order result. Error ",GetLastError());
   }
 
-void RejectCommand(string command_id,string message,uint retcode=0)
+void BlockCommand(string command_id,string message,uint retcode=0)
   {
-   PublishOrderResult(command_id,false,"rejected",message,retcode,0,0,0.0,0.0);
+   PublishOrderResult(command_id,false,"blocked",message,retcode,0,0,0.0,0.0);
    FileDelete(OrderCommandFile,FILE_COMMON);
   }
 
@@ -224,7 +224,7 @@ void ProcessTradeCommand()
    string command_id=CommandValue(text,"command_id");
    if(protocol!=FX2ACTIVE_ORDER_PROTOCOL || StringLen(command_id)==0)
      {
-      RejectCommand(command_id,"Invalid FX2Active order command protocol.");
+      BlockCommand(command_id,"Invalid FX2Active order command protocol.");
       return;
      }
 
@@ -237,22 +237,15 @@ void ProcessTradeCommand()
       return;
      }
 
-   // Mark first. If MT5/Wine crashes after submission, restart will not duplicate it.
-   if(!WriteWholeText(LastCommandFile,command_id+"\n"))
-     {
-      RejectCommand(command_id,"Could not persist FX2Active duplicate guard.");
-      return;
-     }
-
    if(!(bool)TerminalInfoInteger(TERMINAL_CONNECTED))
      {
-      RejectCommand(command_id,"MT5 terminal is not connected.");
+      BlockCommand(command_id,"MT5 terminal is not connected.");
       return;
      }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
       !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
      {
-      RejectCommand(command_id,"MT5 Algo Trading/account trading permission is disabled.");
+      BlockCommand(command_id,"MT5 Algo Trading/account trading permission is disabled.");
       return;
      }
 
@@ -260,14 +253,14 @@ void ProcessTradeCommand()
    long account_mode=AccountInfoInteger(ACCOUNT_TRADE_MODE);
    if(account_mode==ACCOUNT_TRADE_MODE_REAL && !allow_live)
      {
-      RejectCommand(command_id,"Real/live account execution is not armed in FX2Active.");
+      BlockCommand(command_id,"Real/live account execution is not armed in FX2Active.");
       return;
      }
 
    long magic=(long)StringToInteger(CommandValue(text,"magic"));
    if(magic!=FX2ACTIVE_MAGIC)
      {
-      RejectCommand(command_id,"Invalid FX2Active magic number.");
+      BlockCommand(command_id,"Invalid FX2Active magic number.");
       return;
      }
 
@@ -283,24 +276,24 @@ void ProcessTradeCommand()
 
    if((side!="BUY" && side!="SELL") || (mode!="MARKET" && mode!="PENDING"))
      {
-      RejectCommand(command_id,"Invalid FX2Active order side or mode.");
+      BlockCommand(command_id,"Invalid FX2Active order side or mode.");
       return;
      }
    if(volume<=0.0 || planned_entry<=0.0 || sl<=0.0 || tp<=0.0)
      {
-      RejectCommand(command_id,"Invalid FX2Active order prices or volume.");
+      BlockCommand(command_id,"Invalid FX2Active order prices or volume.");
       return;
      }
    if(!SymbolSelect(symbol,true))
      {
-      RejectCommand(command_id,"MT5 could not select the requested symbol.");
+      BlockCommand(command_id,"MT5 could not select the requested symbol.");
       return;
      }
 
    MqlTick tick;
    if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
      {
-      RejectCommand(command_id,"MT5 returned no valid Bid/Ask for the symbol.");
+      BlockCommand(command_id,"MT5 returned no valid Bid/Ask for the symbol.");
       return;
      }
 
@@ -312,7 +305,7 @@ void ProcessTradeCommand()
    SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL,stops_level);
    if(point<=0.0)
      {
-      RejectCommand(command_id,"Broker returned an invalid point size.");
+      BlockCommand(command_id,"Broker returned an invalid point size.");
       return;
      }
 
@@ -320,7 +313,7 @@ void ProcessTradeCommand()
    double spread_pips=(tick.ask-tick.bid)/pip_size;
    if(max_spread_pips>0.0 && spread_pips>max_spread_pips)
      {
-      RejectCommand(command_id,"Current spread exceeds the FX2Active limit.");
+      BlockCommand(command_id,"Current spread exceeds the FX2Active limit.");
       return;
      }
 
@@ -335,12 +328,12 @@ void ProcessTradeCommand()
       order_type=(side=="BUY" ? ORDER_TYPE_BUY_LIMIT : ORDER_TYPE_SELL_LIMIT);
       if(side=="BUY" && price>=tick.ask)
         {
-         RejectCommand(command_id,"BUY LIMIT must be below the current Ask.");
+         BlockCommand(command_id,"BUY LIMIT must be below the current Ask.");
          return;
         }
       if(side=="SELL" && price<=tick.bid)
         {
-         RejectCommand(command_id,"SELL LIMIT must be above the current Bid.");
+         BlockCommand(command_id,"SELL LIMIT must be above the current Bid.");
          return;
         }
      }
@@ -357,12 +350,12 @@ void ProcessTradeCommand()
 
    if(side=="BUY" && !(sl<price && price<tp))
      {
-      RejectCommand(command_id,"BUY order has invalid SL/entry/TP order.");
+      BlockCommand(command_id,"BUY order has invalid SL/entry/TP order.");
       return;
      }
    if(side=="SELL" && !(tp<price && price<sl))
      {
-      RejectCommand(command_id,"SELL order has invalid TP/entry/SL order.");
+      BlockCommand(command_id,"SELL order has invalid TP/entry/SL order.");
       return;
      }
 
@@ -371,7 +364,7 @@ void ProcessTradeCommand()
      {
       if(MathAbs(price-sl)+1e-12<minimum_distance || MathAbs(tp-price)+1e-12<minimum_distance)
         {
-         RejectCommand(command_id,"SL/TP is inside the broker minimum stop distance.");
+         BlockCommand(command_id,"SL/TP is inside the broker minimum stop distance.");
          return;
         }
       if(pending)
@@ -379,7 +372,7 @@ void ProcessTradeCommand()
          double market_distance=(side=="BUY" ? tick.ask-price : price-tick.bid);
          if(market_distance+1e-12<minimum_distance)
            {
-            RejectCommand(command_id,"Pending entry is inside the broker minimum distance.");
+            BlockCommand(command_id,"Pending entry is inside the broker minimum distance.");
             return;
            }
         }
@@ -404,8 +397,16 @@ void ProcessTradeCommand()
    ResetLastError();
    if(!OrderCheck(request,check) || check.retcode!=0)
      {
-      string message="MT5 OrderCheck rejected the FX2Active order: "+check.comment;
-      RejectCommand(command_id,message,check.retcode);
+      string check_message="MT5 OrderCheck rejected the FX2Active order: "+check.comment;
+      BlockCommand(command_id,check_message,check.retcode);
+      return;
+     }
+
+   // Persist the command id only after every retryable pre-check has passed.
+   // From this point on, a crash must never cause this order to be submitted twice.
+   if(!WriteWholeText(LastCommandFile,command_id+"\n"))
+     {
+      BlockCommand(command_id,"Could not persist FX2Active duplicate guard.");
       return;
      }
 
