@@ -11,7 +11,7 @@ from typing import Any, Iterator
 
 BRIDGE_DIR_NAME = "FX2Active"
 BRIDGE_PROTOCOL_VERSION = 2
-BRIDGE_SOURCE_VERSION = "1.10"
+BRIDGE_SOURCE_VERSION = "1.21"
 BRIDGE_SOURCE_FILE = "FX2ActiveBridge.mq5"
 BRIDGE_BINARY_FILE = "FX2ActiveBridge.ex5"
 SNAPSHOT_FILE = "snapshot.json"
@@ -157,8 +157,6 @@ def _running_mt5_prefixes() -> list[Path]:
             if prefix not in found:
                 found.append(prefix)
 
-    # Only fall back to lsof if the process command did not expose the prefix.
-    # Limit this to a few processes and a short timeout so startup cannot hang.
     if found:
         return found
 
@@ -308,8 +306,6 @@ def _find_mql5_dirs(*, force_refresh: bool = False) -> list[Path]:
             if mql5_dir.is_dir() and mql5_dir not in found:
                 found.append(mql5_dir)
 
-        # Broker wrappers occasionally add one extra directory level. Search
-        # only underneath this terminal data root, never the whole Mac.
         for candidate in _bounded_dirs(terminal_root, max_depth=4):
             if candidate.name == "MQL5" and candidate.is_dir() and candidate not in found:
                 found.append(candidate)
