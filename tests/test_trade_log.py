@@ -1,4 +1,8 @@
-from fx2active_bot.trade_log import TradeLogStore
+import json
+import threading
+import time
+
+from fx2active_bot.trade_log import TradeLogStore, follow_runtime_status
 
 
 def sample_status():
@@ -141,3 +145,30 @@ def test_trade_log_clear_removes_history(tmp_path):
     store.clear()
 
     assert store.read() == []
+
+
+def test_runtime_status_follower_records_without_dashboard(tmp_path):
+    status_path = tmp_path / "system_status.json"
+    log_path = tmp_path / "trade_log.json"
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=follow_runtime_status,
+        args=(status_path, log_path, stop_event),
+        kwargs={"poll_seconds": 0.01},
+        daemon=True,
+    )
+    thread.start()
+    try:
+        status_path.write_text(json.dumps(sample_status()), encoding="utf-8")
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if log_path.exists() and TradeLogStore(log_path).read():
+                break
+            time.sleep(0.02)
+    finally:
+        stop_event.set()
+        thread.join(timeout=1.0)
+
+    events = TradeLogStore(log_path).read()
+    assert len(events) == 1
+    assert events[0]["event"] == "Setup"
