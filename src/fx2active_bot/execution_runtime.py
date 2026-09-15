@@ -4,7 +4,7 @@ import json
 import platform
 import threading
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -14,7 +14,7 @@ from .mac_bridge import bridge_loss_per_one_lot, load_snapshot, snapshot_is_fres
 from .mac_trade_executor import MacTradeExecutor
 from .position_sizing import calculate_position_size
 from .system_diagnostics import run_diagnostics
-from .trade_executor import WindowsTradeExecutor, count_bot_exposure
+from .trade_executor import FX2ACTIVE_MAGIC, WindowsTradeExecutor, count_bot_exposure
 from .web_server import ControlPanelServer
 
 
@@ -27,6 +27,92 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         self.windows_executor = WindowsTradeExecutor(state_path=state_path)
         self.mac_executor = MacTradeExecutor(state_path=state_path)
         self.execution_context: dict[str, Any] = {}
+
+    @staticmethod
+    def _deal_close_reason(mt5: Any, reason: Any) -> str:
+        mapping = {
+            getattr(mt5, "DEAL_REASON_SL", object()): "Stop Loss",
+            getattr(mt5, "DEAL_REASON_TP", object()): "Take Profit",
+            getattr(mt5, "DEAL_REASON_EXPERT", object()): "Expert",
+            getattr(mt5, "DEAL_REASON_CLIENT", object()): "Terminal",
+            getattr(mt5, "DEAL_REASON_MOBILE", object()): "Mobile",
+            getattr(mt5, "DEAL_REASON_WEB", object()): "Web",
+        }
+        return mapping.get(reason, "Closed")
+
+    @classmethod
+    def _windows_closed_trades(cls, mt5: Any) -> list[dict[str, Any]]:
+        """Return recent FX2Active exit deals for the dashboard trade log."""
+
+        history_get = getattr(mt5, "history_deals_get", None)
+        if not callable(history_get):
+            return []
+
+        now = datetime.now(timezone.utc)
+        try:
+            deals = history_get(now - timedelta(days=30), now)
+        except Exception:
+            return []
+        if deals is None:
+            return []
+
+        exit_entries = {
+            value
+            for value in (
+                getattr(mt5, "DEAL_ENTRY_OUT", None),
+                getattr(mt5, "DEAL_ENTRY_OUT_BY", None),
+                getattr(mt5, "DEAL_ENTRY_INOUT", None),
+            )
+            if value is not None
+        }
+        buy_type = getattr(mt5, "DEAL_TYPE_BUY", None)
+        sell_type = getattr(mt5, "DEAL_TYPE_SELL", None)
+
+        closed: list[dict[str, Any]] = []
+        for deal in deals:
+            if int(getattr(deal, "magic", 0) or 0) != FX2ACTIVE_MAGIC:
+                continue
+            entry = getattr(deal, "entry", None)
+            if exit_entries and entry not in exit_entries:
+                continue
+
+            deal_type = getattr(deal, "type", None)
+            if deal_type == sell_type:
+                side = "BUY"
+            elif deal_type == buy_type:
+                side = "SELL"
+            else:
+                side = ""
+
+            profit = float(getattr(deal, "profit", 0.0) or 0.0)
+            commission = float(getattr(deal, "commission", 0.0) or 0.0)
+            swap = float(getattr(deal, "swap", 0.0) or 0.0)
+            fee = float(getattr(deal, "fee", 0.0) or 0.0)
+            timestamp_value = int(getattr(deal, "time", 0) or 0)
+            timestamp = (
+                datetime.fromtimestamp(timestamp_value, tz=timezone.utc).isoformat()
+                if timestamp_value > 0
+                else now.isoformat()
+            )
+            closed.append(
+                {
+                    "deal_ticket": int(getattr(deal, "ticket", 0) or 0),
+                    "position_id": int(getattr(deal, "position_id", 0) or 0),
+                    "timestamp_utc": timestamp,
+                    "symbol": str(getattr(deal, "symbol", "") or ""),
+                    "side": side,
+                    "price": float(getattr(deal, "price", 0.0) or 0.0),
+                    "volume": float(getattr(deal, "volume", 0.0) or 0.0),
+                    "profit": profit,
+                    "commission": commission,
+                    "swap": swap,
+                    "fee": fee,
+                    "net_profit": profit + commission + swap + fee,
+                    "close_reason": cls._deal_close_reason(mt5, getattr(deal, "reason", None)),
+                }
+            )
+
+        return closed[-100:]
 
     def _evaluate(
         self,
@@ -80,6 +166,8 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
             "take_profit": setup.take_profit,
             "swing_low": setup.swing_low,
             "swing_high": setup.swing_high,
+            "swing_low_time": setup.swing_low_time,
+            "swing_high_time": setup.swing_high_time,
             "reward_to_risk": setup.reward_to_risk,
             "planned_volume": planned_size.volume,
             "planned_risk_amount": planned_size.risk_amount,
@@ -136,6 +224,7 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
             account = mt5.account_info()
             payload["mt5_connected"] = bool(getattr(terminal, "connected", False)) if terminal else False
             payload["account_connected"] = account is not None
+            payload["closed_trades"] = self._windows_closed_trades(mt5)
 
             if account is not None:
                 payload["account_login_masked"] = self._mask_login(getattr(account, "login", None))
@@ -152,8 +241,6 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
             all_positions = mt5.positions_get()
             payload["account_total_open_positions"] = len(all_positions) if all_positions is not None else None
 
-            # The limit applies to all FX2Active-owned exposure, not just the
-            # currently selected symbol. Switching symbols must not bypass it.
             bot_positions, bot_pending = count_bot_exposure(mt5)
             payload["open_positions"] = bot_positions
             payload["pending_orders"] = bot_pending
@@ -224,6 +311,9 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         snapshot, snapshot_path = load_snapshot()
         payload["mt5_bridge"] = str(snapshot_path)
         payload["mt5_bridge_version"] = snapshot.get("bridge_version")
+        payload["closed_trades"] = (
+            snapshot.get("closed_trades") if isinstance(snapshot.get("closed_trades"), list) else []
+        )
         if not snapshot_is_fresh(snapshot):
             payload["message"] = "The macOS MT5 bridge is not updating. Keep FX2ActiveBridge attached."
             return payload
@@ -325,6 +415,7 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
             "strategy_evaluating": False,
             "last_setup": None,
             "execution_result": None,
+            "closed_trades": [],
             "message": "Worker is starting...",
         }
         try:
@@ -348,9 +439,12 @@ def run_execution_system(
     dashboard_pin: str | None = None,
 ) -> None:
     root = Path(root)
+    # RuntimeSettingsStore transparently migrates this versioned defaults path
+    # to data/runtime/runtime_settings.json so user settings never block git pull.
     settings_path = root / "config" / "runtime_settings.json"
     status_path = root / "data" / "runtime" / "system_status.json"
     diagnostics_path = root / "data" / "runtime" / "diagnostics.json"
+    trade_log_path = root / "data" / "runtime" / "trade_log.json"
     lan_mode = access_mode == "lan"
 
     diagnostics = run_diagnostics(
@@ -390,7 +484,7 @@ def run_execution_system(
     else:
         print(" Dashboard access: this computer only.")
     print(" Broker execution is controlled separately from the strategy master switch.")
-    print(" Keep this window open while the bot is running.")
+    print(" Keep this window open while FX2Active is running.")
     print(" Press Ctrl+C to stop the local system.")
     print("================================================\n")
 
@@ -400,6 +494,7 @@ def run_execution_system(
         settings_path=settings_path,
         status_path=status_path,
         diagnostics_path=diagnostics_path,
+        trade_log_path=trade_log_path,
         web_root=root / "web",
         host=host,
         port=port,
@@ -412,3 +507,4 @@ def run_execution_system(
         print("\nStopping FX2Active...")
     finally:
         monitor.stop()
+        thread.join(timeout=5.0)
