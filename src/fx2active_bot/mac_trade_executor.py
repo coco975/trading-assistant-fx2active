@@ -43,6 +43,7 @@ def write_order_command(bridge_dir: Path, payload: dict[str, Any]) -> Path:
         f"tp={float(payload['tp']):.10f}",
         f"deviation={int(payload['deviation'])}",
         f"max_spread_pips={float(payload['max_spread_pips']):.4f}",
+        f"max_exposure={int(payload['max_exposure'])}",
         f"allow_live={1 if payload['allow_live'] else 0}",
         f"magic={FX2ACTIVE_MAGIC}",
         f"comment={FX2ACTIVE_COMMENT}",
@@ -88,13 +89,9 @@ class MacTradeExecutor:
     ) -> ExecutionResult:
         result = self._convert_result(fingerprint, payload)
         if result.status == "blocked":
-            # The MQL bridge never reached OrderSend. Delete this transient result
-            # so the same valid setup can be rechecked on a later worker cycle.
             _discard_result(bridge_dir)
             return result
 
-        # Filled/placed/partial/rejected all crossed the broker submission boundary.
-        # Persist them so a restart or worker cycle cannot submit the setup again.
         self.state.record(fingerprint, result)
         return result
 
@@ -191,6 +188,7 @@ class MacTradeExecutor:
             "tp": float(setup.take_profit),
             "deviation": int(settings.max_deviation_points),
             "max_spread_pips": float(settings.max_spread_pips),
+            "max_exposure": int(settings.max_open_positions),
             "allow_live": bool(settings.allow_live_account),
         }
         write_order_command(bridge_dir, command)
