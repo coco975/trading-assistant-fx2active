@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import tempfile
 from dataclasses import asdict, dataclass, field
@@ -18,6 +19,17 @@ class PoiSettings:
     min_confirmations: int = 1
 
     def __post_init__(self) -> None:
+        for name in (
+            "support_resistance",
+            "previous_swing",
+            "trendline",
+            "psychological_level",
+            "candle_confirmation",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be true or false")
+        if isinstance(self.min_confirmations, bool) or not isinstance(self.min_confirmations, int):
+            raise ValueError("min_confirmations must be an integer")
         if not 0 <= self.min_confirmations <= 5:
             raise ValueError("min_confirmations must be between 0 and 5")
 
@@ -52,10 +64,40 @@ class RuntimeSettings:
     poi: PoiSettings = field(default_factory=PoiSettings)
 
     def __post_init__(self) -> None:
+        for name in (
+            "trading_enabled",
+            "allow_buys",
+            "allow_sells",
+            "fib_enabled",
+            "live_execution_enabled",
+            "allow_live_account",
+        ):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be true or false")
+
         if self.timeframe != "M15":
             raise ValueError("This test strategy is currently locked to M15")
+        if not isinstance(self.symbol, str):
+            raise ValueError("symbol must be text")
         if len(self.symbol) > 64:
             raise ValueError("symbol is too long")
+        if any(character in self.symbol for character in "\r\n\x00"):
+            raise ValueError("symbol contains invalid characters")
+
+        numeric_fields = {
+            "fib_retracement": self.fib_retracement,
+            "stop_buffer_pips": self.stop_buffer_pips,
+            "risk_percent": self.risk_percent,
+            "fixed_lot": self.fixed_lot,
+            "fixed_cash_risk": self.fixed_cash_risk,
+            "max_spread_pips": self.max_spread_pips,
+        }
+        for name, value in numeric_fields.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"{name} must be a number")
+            if not math.isfinite(float(value)):
+                raise ValueError(f"{name} must be finite")
+
         if not 0 < self.fib_retracement < 1:
             raise ValueError("fib_retracement must be between 0 and 1")
         if self.stop_buffer_pips <= 0:
@@ -64,6 +106,8 @@ class RuntimeSettings:
             raise ValueError("take_profit_mode must be swing_target")
         if self.entry_trigger not in {"touch", "close_back_in_direction", "directional_close"}:
             raise ValueError("unsupported entry_trigger")
+        if isinstance(self.max_open_positions, bool) or not isinstance(self.max_open_positions, int):
+            raise ValueError("max_open_positions must be an integer")
         if not 1 <= self.max_open_positions <= 20:
             raise ValueError("max_open_positions must be between 1 and 20")
         if self.sizing_mode not in {"risk_percent", "fixed_lot", "fixed_cash"}:
@@ -78,13 +122,19 @@ class RuntimeSettings:
             raise ValueError("unsupported execution_mode")
         if not 0 <= self.max_spread_pips <= 10000:
             raise ValueError("max_spread_pips must be between 0 and 10000")
+        if isinstance(self.max_deviation_points, bool) or not isinstance(self.max_deviation_points, int):
+            raise ValueError("max_deviation_points must be an integer")
         if not 0 <= self.max_deviation_points <= 10000:
             raise ValueError("max_deviation_points must be between 0 and 10000")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
+        if not isinstance(data, dict):
+            raise ValueError("runtime settings must be a JSON object")
         payload = dict(data)
         poi_data = payload.pop("poi", {})
+        if not isinstance(poi_data, dict):
+            raise ValueError("poi settings must be a JSON object")
 
         # Backward compatibility with earlier dashboard settings.
         if payload.get("take_profit_mode") == "swing_high":
@@ -129,7 +179,7 @@ class RuntimeSettingsStore:
 
     def save(self, settings: RuntimeSettings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(settings.to_dict(), indent=2, sort_keys=True) + "\n"
+        payload = json.dumps(settings.to_dict(), indent=2, sort_keys=True, allow_nan=False) + "\n"
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", dir=str(self.path.parent), text=True
         )
