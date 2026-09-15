@@ -1,10 +1,14 @@
 #property strict
-#property version   "1.00"
+#property version   "1.10"
 #property description "FX2Active local bridge for macOS MetaTrader 5"
 #property description "Attach this EA to one chart and keep Algo Trading enabled."
 
+#define FX2ACTIVE_PROTOCOL_VERSION 2
+
+string BridgeVersion = "1.10";
 string BridgeFolder = "FX2Active";
 string SnapshotFile = "FX2Active\\snapshot.json";
+string SnapshotTempFile = "FX2Active\\snapshot.tmp";
 string RequestedSymbolFile = "FX2Active\\requested_symbol.txt";
 
 string JsonBool(bool value)
@@ -72,6 +76,7 @@ void WriteSnapshot()
    FolderCreate(BridgeFolder,FILE_COMMON);
 
    string symbol=ReadRequestedSymbol();
+   ResetLastError();
    bool selected=SymbolSelect(symbol,true);
 
    double point=0.0;
@@ -93,12 +98,16 @@ void WriteSnapshot()
       SymbolInfoDouble(symbol,SYMBOL_TRADE_TICK_VALUE_LOSS,tick_value_loss);
      }
 
+   long heartbeat=(long)TimeGMT();
    string json="{";
-   json+="\"protocol_version\":1,";
-   json+="\"heartbeat\":"+IntegerToString((long)TimeLocal())+",";
+   json+="\"protocol_version\":"+IntegerToString(FX2ACTIVE_PROTOCOL_VERSION)+",";
+   json+="\"bridge_version\":"+JsonString(BridgeVersion)+",";
+   json+="\"heartbeat\":"+IntegerToString(heartbeat)+",";
+   json+="\"heartbeat_utc\":"+IntegerToString(heartbeat)+",";
    json+="\"terminal\":{";
    json+="\"connected\":"+JsonBool((bool)TerminalInfoInteger(TERMINAL_CONNECTED))+",";
-   json+="\"trade_allowed\":"+JsonBool((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))+"},";
+   json+="\"trade_allowed\":"+JsonBool((bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED))+",";
+   json+="\"build\":"+IntegerToString(TerminalInfoInteger(TERMINAL_BUILD))+"},";
    json+="\"account\":{";
    json+="\"login\":"+JsonString(IntegerToString(AccountInfoInteger(ACCOUNT_LOGIN)))+",";
    json+="\"server\":"+JsonString(AccountInfoString(ACCOUNT_SERVER))+",";
@@ -120,22 +129,35 @@ void WriteSnapshot()
    json+="\"rates\":"+(selected ? BuildRatesJson(symbol) : "[]");
    json+="}";
 
-   int handle=FileOpen(SnapshotFile,
-                       FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ|FILE_SHARE_WRITE,
+   int handle=FileOpen(SnapshotTempFile,
+                       FILE_WRITE|FILE_TXT|FILE_ANSI|FILE_COMMON|FILE_SHARE_READ,
                        0,CP_UTF8);
    if(handle==INVALID_HANDLE)
      {
-      Print("FX2Active bridge could not open snapshot file. Error ",GetLastError());
+      Print("FX2Active bridge could not open temporary snapshot file. Error ",GetLastError());
       return;
      }
+
    FileWriteString(handle,json);
    FileFlush(handle);
    FileClose(handle);
+
+   ResetLastError();
+   if(!FileMove(SnapshotTempFile,FILE_COMMON,SnapshotFile,FILE_COMMON|FILE_REWRITE))
+     {
+      Print("FX2Active bridge could not publish snapshot file. Error ",GetLastError());
+      return;
+     }
   }
 
 int OnInit()
   {
-   EventSetTimer(1);
+   if(!EventSetTimer(1))
+     {
+      Print("FX2Active bridge could not start its timer. Error ",GetLastError());
+      return INIT_FAILED;
+     }
+
    WriteSnapshot();
    Print("FX2Active bridge started. Keep this EA attached to one chart.");
    return INIT_SUCCEEDED;
