@@ -1,5 +1,6 @@
 {
   "allow_buys": true,
+  "allow_live_account": false,
   "allow_sells": true,
   "entry_trigger": "touch",
   "execution_mode": "market_on_trigger",
@@ -7,7 +8,10 @@
   "fib_retracement": 0.786,
   "fixed_cash_risk": 10.0,
   "fixed_lot": 0.01,
+  "live_execution_enabled": false,
+  "max_deviation_points": 20,
   "max_open_positions": 1,
+  "max_spread_pips": 0.0,
   "poi": {
     "candle_confirmation": true,
     "min_confirmations": 1,
