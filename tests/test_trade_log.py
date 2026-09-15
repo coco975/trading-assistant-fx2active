@@ -137,14 +137,27 @@ def test_trade_log_ignores_disabled_and_duplicate_execution_states(tmp_path):
     assert events[0]["event"] == "Setup"
 
 
-def test_trade_log_clear_removes_history(tmp_path):
+def test_trade_log_clear_suppresses_same_history_but_allows_new_setup(tmp_path):
     store = TradeLogStore(tmp_path / "trade_log.json")
-    store.capture_status(sample_status())
+    original = sample_status()
+    store.capture_status(original)
     assert store.read()
 
     store.clear()
-
     assert store.read() == []
+
+    # Runtime/broker snapshots still contain the old event after clearing; it
+    # should stay cleared instead of reappearing on the next dashboard refresh.
+    store.capture_status(original)
+    assert store.read() == []
+
+    new_setup = sample_status()
+    new_setup["last_setup"]["swing_low_time"] = "2026-09-15T21:00:00+00:00"
+    new_setup["last_setup"]["swing_high_time"] = "2026-09-15T22:00:00+00:00"
+    store.capture_status(new_setup)
+    events = store.read()
+    assert len(events) == 1
+    assert events[0]["event"] == "Setup"
 
 
 def test_runtime_status_follower_records_without_dashboard(tmp_path):
