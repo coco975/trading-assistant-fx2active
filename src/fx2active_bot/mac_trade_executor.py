@@ -42,6 +42,7 @@ def write_order_command(bridge_dir: Path, payload: dict[str, Any]) -> Path:
         f"sl={float(payload['sl']):.10f}",
         f"tp={float(payload['tp']):.10f}",
         f"deviation={int(payload['deviation'])}",
+        f"max_spread_pips={float(payload['max_spread_pips']):.4f}",
         f"allow_live={1 if payload['allow_live'] else 0}",
         f"magic={FX2ACTIVE_MAGIC}",
         f"comment={FX2ACTIVE_COMMENT}",
@@ -150,6 +151,7 @@ class MacTradeExecutor:
             "sl": float(setup.stop_loss),
             "tp": float(setup.take_profit),
             "deviation": int(settings.max_deviation_points),
+            "max_spread_pips": float(settings.max_spread_pips),
             "allow_live": bool(settings.allow_live_account),
         }
         write_order_command(bridge_dir, command)
