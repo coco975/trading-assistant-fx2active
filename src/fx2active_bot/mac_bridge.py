@@ -10,12 +10,24 @@ from pathlib import Path
 from typing import Any, Iterator
 
 BRIDGE_DIR_NAME = "FX2Active"
+BRIDGE_PROTOCOL_VERSION = 2
+BRIDGE_SOURCE_VERSION = "1.10"
+BRIDGE_SOURCE_FILE = "FX2ActiveBridge.mq5"
+BRIDGE_BINARY_FILE = "FX2ActiveBridge.ex5"
 SNAPSHOT_FILE = "snapshot.json"
 REQUESTED_SYMBOL_FILE = "requested_symbol.txt"
 BRIDGE_STALE_SECONDS = 15.0
+BRIDGE_CLOCK_SKEW_SECONDS = 5.0
 PREFIX_CACHE_SECONDS = 10.0
+SNAPSHOT_READ_ATTEMPTS = 3
+SNAPSHOT_READ_DELAY_SECONDS = 0.05
 
 _prefix_cache: tuple[float, tuple[Path, ...]] | None = None
+
+
+def clear_prefix_cache() -> None:
+    global _prefix_cache
+    _prefix_cache = None
 
 
 def _candidate_prefixes() -> list[Path]:
@@ -81,7 +93,7 @@ def _path_prefix_from_drive_c(path_text: str) -> Path | None:
     if index <= 0:
         return None
     prefix = Path(normalized[:index]).expanduser()
-    return prefix if prefix.is_dir() else None
+    return prefix if prefix.is_dir() and (prefix / "drive_c").is_dir() else None
 
 
 def _prefixes_from_command(command: str) -> list[Path]:
@@ -99,7 +111,11 @@ def _prefixes_from_command(command: str) -> list[Path]:
         if part.startswith("WINEPREFIX="):
             value = part.split("=", 1)[1].strip().strip('"').strip("'")
             candidate = Path(value).expanduser()
-            if candidate.is_dir() and (candidate / "drive_c").is_dir() and candidate not in found:
+            if (
+                candidate.is_dir()
+                and (candidate / "drive_c").is_dir()
+                and candidate not in found
+            ):
                 found.append(candidate)
     return found
 
@@ -115,7 +131,7 @@ def _running_mt5_prefixes() -> list[Path]:
             check=False,
             capture_output=True,
             text=True,
-            timeout=3,
+            timeout=2,
         )
     except (OSError, subprocess.SubprocessError):
         return found
@@ -141,16 +157,19 @@ def _running_mt5_prefixes() -> list[Path]:
             if prefix not in found:
                 found.append(prefix)
 
-    # Wine command lines are not always descriptive. lsof normally exposes at
-    # least one file underneath the active prefix, which lets us recover it.
-    for pid in pids[:8]:
+    # Only fall back to lsof if the process command did not expose the prefix.
+    # Limit this to a few processes and a short timeout so startup cannot hang.
+    if found:
+        return found
+
+    for pid in pids[:3]:
         try:
             opened = subprocess.run(
                 ["lsof", "-Fn", "-p", pid],
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=3,
+                timeout=1,
             )
         except (OSError, subprocess.SubprocessError):
             continue
@@ -226,8 +245,6 @@ def _wine_prefixes(*, force_refresh: bool = False) -> tuple[Path, ...]:
 
     for root in _named_mac_candidates():
         add(root)
-        # Broker-branded wrappers may place the actual prefix a few folders
-        # below their top-level Application Support or .app directory.
         for candidate in _bounded_dirs(root, max_depth=6):
             add(candidate)
 
@@ -251,6 +268,14 @@ def _discover_dirs(patterns: list[str], *, force_refresh: bool = False) -> list[
     return found
 
 
+def _terminal_roots(*, force_refresh: bool = False) -> list[Path]:
+    patterns = [
+        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal",
+        "drive_c/users/*/Application Data/MetaQuotes/Terminal",
+    ]
+    return _discover_dirs(patterns, force_refresh=force_refresh)
+
+
 def find_common_files_dirs(*, force_refresh: bool = False) -> list[Path]:
     """Locate MetaTrader's FILE_COMMON directory inside a macOS Wine prefix."""
 
@@ -259,142 +284,230 @@ def find_common_files_dirs(*, force_refresh: bool = False) -> list[Path]:
         path = Path(override).expanduser()
         return [path.parent if path.name == BRIDGE_DIR_NAME else path]
 
-    patterns = [
-        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/Common/Files",
-        "drive_c/users/*/Application Data/MetaQuotes/Terminal/Common/Files",
-    ]
-    return _discover_dirs(patterns, force_refresh=force_refresh)
+    found: list[Path] = []
+    for terminal_root in _terminal_roots(force_refresh=force_refresh):
+        common_files = terminal_root / "Common" / "Files"
+        if common_files not in found:
+            found.append(common_files)
+    return found
 
 
 def _find_mql5_dirs(*, force_refresh: bool = False) -> list[Path]:
-    patterns = [
-        "drive_c/users/*/AppData/Roaming/MetaQuotes/Terminal/*/MQL5",
-        "drive_c/users/*/Application Data/MetaQuotes/Terminal/*/MQL5",
-        "drive_c/Program Files/*/MQL5",
-        "drive_c/Program Files (x86)/*/MQL5",
-    ]
-    found = _discover_dirs(patterns, force_refresh=force_refresh)
+    found: list[Path] = []
 
-    # Some broker wrappers add one extra installation directory beneath
-    # Program Files. Search only the known Wine prefixes, not the whole Mac.
-    for prefix in _wine_prefixes(force_refresh=force_refresh):
-        for base in (
-            prefix / "drive_c" / "Program Files",
-            prefix / "drive_c" / "Program Files (x86)",
-        ):
-            if not base.is_dir():
+    for terminal_root in _terminal_roots(force_refresh=force_refresh):
+        try:
+            children = list(terminal_root.iterdir())
+        except (OSError, PermissionError):
+            continue
+
+        for child in children:
+            if child.name == "Common" or not child.is_dir():
                 continue
-            for candidate in _bounded_dirs(base, max_depth=4):
-                if candidate.name == "MQL5" and candidate not in found:
-                    found.append(candidate)
+            mql5_dir = child / "MQL5"
+            if mql5_dir.is_dir() and mql5_dir not in found:
+                found.append(mql5_dir)
+
+        # Broker wrappers occasionally add one extra directory level. Search
+        # only underneath this terminal data root, never the whole Mac.
+        for candidate in _bounded_dirs(terminal_root, max_depth=4):
+            if candidate.name == "MQL5" and candidate.is_dir() and candidate not in found:
+                found.append(candidate)
+
     return found
 
 
 def find_experts_dirs(*, force_refresh: bool = False) -> list[Path]:
     """Locate or derive installed MT5 MQL5/Experts directories."""
 
-    found: list[Path] = []
-    for mql5_dir in _find_mql5_dirs(force_refresh=force_refresh):
-        experts = mql5_dir / "Experts"
-        if experts not in found:
-            found.append(experts)
-    return found
+    return [path / "Experts" for path in _find_mql5_dirs(force_refresh=force_refresh)]
+
+
+def _same_file_contents(first: Path, second: Path) -> bool:
+    try:
+        return first.is_file() and second.is_file() and first.read_bytes() == second.read_bytes()
+    except OSError:
+        return False
 
 
 def install_bridge_source(source: str | Path) -> list[Path]:
-    """Create FX2Active under Experts and copy the bridge source automatically."""
+    """Create FX2Active under Experts and copy the latest bridge source."""
 
     source_path = Path(source)
     if not source_path.is_file():
         raise FileNotFoundError(f"Bridge source does not exist: {source_path}")
 
     installed: list[Path] = []
-    experts_dirs = find_experts_dirs(force_refresh=True)
-    for experts_dir in experts_dirs:
+    for experts_dir in find_experts_dirs(force_refresh=True):
         try:
             target_dir = experts_dir / BRIDGE_DIR_NAME
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / source_path.name
-            shutil.copy2(source_path, target)
+            if not _same_file_contents(source_path, target):
+                shutil.copyfile(source_path, target)
             installed.append(target)
         except OSError:
             continue
     return installed
 
 
-def find_snapshot_path() -> Path | None:
+def find_installed_bridge_sources(*, force_refresh: bool = False) -> list[Path]:
+    found: list[Path] = []
+    for experts_dir in find_experts_dirs(force_refresh=force_refresh):
+        candidate = experts_dir / BRIDGE_DIR_NAME / BRIDGE_SOURCE_FILE
+        if candidate.is_file() and candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def find_compiled_bridge_binaries(*, force_refresh: bool = False) -> list[Path]:
+    found: list[Path] = []
+    for experts_dir in find_experts_dirs(force_refresh=force_refresh):
+        candidate = experts_dir / BRIDGE_DIR_NAME / BRIDGE_BINARY_FILE
+        if candidate.is_file() and candidate not in found:
+            found.append(candidate)
+    return found
+
+
+def bridge_source_needs_compile(source_path: str | Path) -> bool:
+    source = Path(source_path)
+    compiled = source.with_suffix(".ex5")
+    if not compiled.is_file():
+        return True
+    try:
+        return compiled.stat().st_mtime < source.stat().st_mtime
+    except OSError:
+        return True
+
+
+def _snapshot_candidates(*, force_refresh: bool = False) -> list[Path]:
     candidates: list[Path] = []
     override = os.environ.get("FX2ACTIVE_MT5_BRIDGE_DIR", "").strip()
     if override:
         base = Path(override).expanduser()
-        if base.name == BRIDGE_DIR_NAME:
-            candidates.append(base / SNAPSHOT_FILE)
-        else:
-            candidates.append(base / BRIDGE_DIR_NAME / SNAPSHOT_FILE)
+        candidate = base / SNAPSHOT_FILE if base.name == BRIDGE_DIR_NAME else base / BRIDGE_DIR_NAME / SNAPSHOT_FILE
+        candidates.append(candidate)
 
-    for common_dir in find_common_files_dirs():
-        candidates.append(common_dir / BRIDGE_DIR_NAME / SNAPSHOT_FILE)
+    for common_dir in find_common_files_dirs(force_refresh=force_refresh):
+        candidate = common_dir / BRIDGE_DIR_NAME / SNAPSHOT_FILE
+        if candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
 
-    existing = [path for path in candidates if path.is_file()]
+
+def find_snapshot_path() -> Path | None:
+    existing = [path for path in _snapshot_candidates() if path.is_file()]
     if not existing:
-        # MT5 may have been opened after FX2Active started. Refresh prefix
-        # discovery before giving up.
-        for common_dir in find_common_files_dirs(force_refresh=True):
-            candidate = common_dir / BRIDGE_DIR_NAME / SNAPSHOT_FILE
-            if candidate.is_file() and candidate not in existing:
-                existing.append(candidate)
-
+        existing = [path for path in _snapshot_candidates(force_refresh=True) if path.is_file()]
     if not existing:
         return None
     return max(existing, key=lambda path: path.stat().st_mtime)
 
 
-def load_snapshot() -> tuple[dict[str, Any], Path]:
-    path = find_snapshot_path()
-    if path is None:
-        raise FileNotFoundError(
-            "FX2Active MT5 bridge snapshot was not found. Attach FX2ActiveBridge to a chart in MetaTrader 5."
-        )
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Could not read the FX2Active MT5 bridge snapshot: {exc}") from exc
+def validate_snapshot(payload: dict[str, Any]) -> None:
     if not isinstance(payload, dict):
         raise RuntimeError("FX2Active MT5 bridge snapshot has an invalid format")
-    return payload, path
+
+    try:
+        protocol = int(payload.get("protocol_version", 0) or 0)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("FX2Active MT5 bridge protocol value is invalid") from exc
+
+    if protocol != BRIDGE_PROTOCOL_VERSION:
+        raise RuntimeError(
+            "FX2Active MT5 bridge is out of date "
+            f"(protocol {protocol}, expected {BRIDGE_PROTOCOL_VERSION}). "
+            "Recompile the latest FX2ActiveBridge.mq5 in MetaEditor."
+        )
+
+    for key in ("terminal", "account", "symbol"):
+        if not isinstance(payload.get(key), dict):
+            raise RuntimeError(f"FX2Active MT5 bridge snapshot is missing '{key}' data")
+    if not isinstance(payload.get("rates"), list):
+        raise RuntimeError("FX2Active MT5 bridge snapshot is missing rates data")
+
+    heartbeat = payload.get("heartbeat_utc", payload.get("heartbeat"))
+    try:
+        if float(heartbeat or 0.0) <= 0:
+            raise ValueError
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("FX2Active MT5 bridge snapshot has an invalid heartbeat") from exc
+
+
+def _read_snapshot(path: Path) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for attempt in range(SNAPSHOT_READ_ATTEMPTS):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            validate_snapshot(payload)
+            return payload
+        except (OSError, json.JSONDecodeError, RuntimeError) as exc:
+            last_error = exc
+            if attempt + 1 < SNAPSHOT_READ_ATTEMPTS:
+                time.sleep(SNAPSHOT_READ_DELAY_SECONDS)
+
+    if isinstance(last_error, RuntimeError):
+        raise last_error
+    raise RuntimeError(f"Could not read the FX2Active MT5 bridge snapshot: {last_error}")
+
+
+def load_snapshot() -> tuple[dict[str, Any], Path]:
+    candidates = [path for path in _snapshot_candidates() if path.is_file()]
+    if not candidates:
+        candidates = [path for path in _snapshot_candidates(force_refresh=True) if path.is_file()]
+    if not candidates:
+        raise FileNotFoundError(
+            "FX2Active MT5 bridge snapshot was not found. "
+            "Compile and attach FX2ActiveBridge to one MetaTrader 5 chart."
+        )
+
+    errors: list[str] = []
+    for path in sorted(candidates, key=lambda item: item.stat().st_mtime, reverse=True):
+        try:
+            return _read_snapshot(path), path
+        except RuntimeError as exc:
+            errors.append(f"{path}: {exc}")
+
+    raise RuntimeError(errors[0] if errors else "No readable FX2Active bridge snapshot was found")
 
 
 def snapshot_age_seconds(snapshot: dict[str, Any]) -> float:
-    heartbeat = float(snapshot.get("heartbeat", 0.0) or 0.0)
+    heartbeat = float(snapshot.get("heartbeat_utc", snapshot.get("heartbeat", 0.0)) or 0.0)
     if heartbeat <= 0:
         return float("inf")
-    return max(0.0, time.time() - heartbeat)
+    delta = time.time() - heartbeat
+    if delta < -BRIDGE_CLOCK_SKEW_SECONDS:
+        return float("inf")
+    return max(0.0, delta)
 
 
 def snapshot_is_fresh(snapshot: dict[str, Any]) -> bool:
     return snapshot_age_seconds(snapshot) <= BRIDGE_STALE_SECONDS
 
 
+def _write_symbol_file(bridge_dir: Path, symbol: str) -> Path:
+    bridge_dir.mkdir(parents=True, exist_ok=True)
+    target = bridge_dir / REQUESTED_SYMBOL_FILE
+    temporary = bridge_dir / f".{REQUESTED_SYMBOL_FILE}.tmp"
+    temporary.write_text(symbol + "\n", encoding="utf-8")
+    os.replace(temporary, target)
+    return target
+
+
 def write_requested_symbol(symbol: str) -> Path | None:
     symbol = symbol.strip()
     if not symbol:
         return None
+    if len(symbol) > 64 or any(character in symbol for character in "\r\n\x00"):
+        raise ValueError("Invalid MT5 symbol name")
 
     snapshot_path = find_snapshot_path()
     if snapshot_path is not None:
-        bridge_dir = snapshot_path.parent
-        bridge_dir.mkdir(parents=True, exist_ok=True)
-        target = bridge_dir / REQUESTED_SYMBOL_FILE
-        target.write_text(symbol + "\n", encoding="utf-8")
-        return target
+        return _write_symbol_file(snapshot_path.parent, symbol)
 
     for common_dir in find_common_files_dirs(force_refresh=True):
         try:
-            bridge_dir = common_dir / BRIDGE_DIR_NAME
-            bridge_dir.mkdir(parents=True, exist_ok=True)
-            target = bridge_dir / REQUESTED_SYMBOL_FILE
-            target.write_text(symbol + "\n", encoding="utf-8")
-            return target
+            return _write_symbol_file(common_dir / BRIDGE_DIR_NAME, symbol)
         except OSError:
             continue
     return None
