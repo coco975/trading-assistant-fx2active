@@ -10,13 +10,15 @@ def test_mql5_bridge_uses_utc_protocol_atomic_publish_and_execution_channel() ->
     assert "FX2ACTIVE_PROTOCOL_VERSION 2" in source
     assert "FX2ACTIVE_ORDER_PROTOCOL 1" in source
     assert "FX2ACTIVE_MAGIC 26091501" in source
-    assert 'BridgeVersion = "1.20"' in source
+    assert 'BridgeVersion = "1.21"' in source
     assert "TimeGMT()" in source
     assert "TimeLocal()" not in source
     assert "SnapshotTempFile" in source
     assert "OrderCommandFile" in source
     assert "OrderResultFile" in source
     assert "LastCommandFile" in source
+    assert "BlockCommand(" in source
+    assert 'PublishOrderResult(command_id,false,"blocked"' in source
     assert "OrderCheck(" in source
     assert "OrderSend(" in source
     assert "TRADE_RETCODE_DONE" in source
@@ -25,6 +27,13 @@ def test_mql5_bridge_uses_utc_protocol_atomic_publish_and_execution_channel() ->
     assert "FILE_REWRITE" in source
     assert "FILE_COMMON" in source
     assert "EventSetTimer(1)" in source
+
+    # Duplicate marker must be persisted after broker pre-checks and before the
+    # actual send boundary: temporary blocks can retry, submitted commands cannot.
+    order_check_index = source.index("OrderCheck(request,check)")
+    duplicate_marker_index = source.index("WriteWholeText(LastCommandFile,command_id")
+    order_send_index = source.index("OrderSend(request,result)")
+    assert order_check_index < duplicate_marker_index < order_send_index
 
 
 def test_python_live_execution_is_isolated_to_trade_executor() -> None:
