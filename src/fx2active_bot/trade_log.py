@@ -17,6 +17,10 @@ class TradeLogStore:
         self.max_entries = max_entries
         self._lock = threading.Lock()
 
+    @property
+    def suppression_path(self) -> Path:
+        return self.path.with_name(f"{self.path.stem}_cleared.json")
+
     def _load_unlocked(self) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
@@ -28,21 +32,34 @@ class TradeLogStore:
             raise RuntimeError("FX2Active trade log has an invalid format")
         return payload
 
-    def _save_unlocked(self, items: list[dict[str, Any]]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp_name = tempfile.mkstemp(
-            prefix=f".{self.path.name}.", dir=str(self.path.parent), text=True
-        )
+    def _load_suppressed_unlocked(self) -> set[str]:
+        if not self.suppression_path.exists():
+            return set()
+        try:
+            payload = json.loads(self.suppression_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return set()
+        if not isinstance(payload, list):
+            return set()
+        return {str(item) for item in payload if item}
+
+    @staticmethod
+    def _atomic_json_write(path: Path, payload: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent), text=True)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(items[-self.max_entries :], handle, indent=2, allow_nan=False)
+                json.dump(payload, handle, indent=2, allow_nan=False)
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(tmp_name, self.path)
+            os.replace(tmp_name, path)
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
+
+    def _save_unlocked(self, items: list[dict[str, Any]]) -> None:
+        self._atomic_json_write(self.path, items[-self.max_entries :])
 
     def read(self, *, limit: int = 100) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit), self.max_entries))
@@ -51,7 +68,16 @@ class TradeLogStore:
         return list(reversed(items[-limit:]))
 
     def clear(self) -> None:
+        """Clear visible history without letting recent broker history instantly repopulate it."""
+
         with self._lock:
+            items = self._load_unlocked()
+            suppressed = self._load_suppressed_unlocked()
+            suppressed.update(str(item.get("event_key", "")) for item in items if item.get("event_key"))
+            # Keep bounded suppression history. Event keys include swing times/tickets,
+            # so genuinely new setups and future close deals still appear normally.
+            bounded = list(suppressed)[-2000:]
+            self._atomic_json_write(self.suppression_path, bounded)
             self._save_unlocked([])
 
     @staticmethod
@@ -203,10 +229,11 @@ class TradeLogStore:
         with self._lock:
             items = self._load_unlocked()
             existing_keys = {str(item.get("event_key", "")) for item in items}
+            suppressed_keys = self._load_suppressed_unlocked()
             changed = False
             for event in pending:
                 event_key = str(event.get("event_key", ""))
-                if event_key and event_key in existing_keys:
+                if event_key and (event_key in existing_keys or event_key in suppressed_keys):
                     continue
                 record = dict(event)
                 record.setdefault("timestamp_utc", datetime.now(timezone.utc).isoformat())
