@@ -68,9 +68,35 @@ def read_order_result(bridge_dir: Path, command_id: str) -> dict[str, Any] | Non
     return None
 
 
+def _discard_result(bridge_dir: Path) -> None:
+    try:
+        (bridge_dir / ORDER_RESULT_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 class MacTradeExecutor:
     def __init__(self, *, state_path: str | Path) -> None:
         self.state = ExecutionStateStore(state_path)
+
+    def _result_from_payload(
+        self,
+        *,
+        bridge_dir: Path,
+        fingerprint: str,
+        payload: dict[str, Any],
+    ) -> ExecutionResult:
+        result = self._convert_result(fingerprint, payload)
+        if result.status == "blocked":
+            # The MQL bridge never reached OrderSend. Delete this transient result
+            # so the same valid setup can be rechecked on a later worker cycle.
+            _discard_result(bridge_dir)
+            return result
+
+        # Filled/placed/partial/rejected all crossed the broker submission boundary.
+        # Persist them so a restart or worker cycle cannot submit the setup again.
+        self.state.record(fingerprint, result)
+        return result
 
     def execute(
         self,
@@ -95,6 +121,17 @@ class MacTradeExecutor:
             )
 
         account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
+        terminal = snapshot.get("terminal") if isinstance(snapshot.get("terminal"), dict) else {}
+        if not bool(terminal.get("connected")):
+            return ExecutionResult(False, "blocked", "MT5 terminal is not connected.", fingerprint)
+        if not bool(terminal.get("trade_allowed")) or not bool(account.get("trade_allowed")):
+            return ExecutionResult(
+                False,
+                "blocked",
+                "MT5 Algo Trading/account trading permission is disabled.",
+                fingerprint,
+            )
+
         trade_mode = account.get("trade_mode")
         if trade_mode is None and not settings.allow_live_account:
             return ExecutionResult(
@@ -137,9 +174,11 @@ class MacTradeExecutor:
         bridge_dir = snapshot_path.parent
         existing = read_order_result(bridge_dir, fingerprint)
         if existing is not None:
-            result = self._convert_result(fingerprint, existing)
-            self.state.record(fingerprint, result)
-            return result
+            existing_result = self._convert_result(fingerprint, existing)
+            if existing_result.status != "blocked":
+                self.state.record(fingerprint, existing_result)
+                return existing_result
+            _discard_result(bridge_dir)
 
         command = {
             "command_id": fingerprint,
@@ -160,9 +199,11 @@ class MacTradeExecutor:
         while time.monotonic() < deadline:
             payload = read_order_result(bridge_dir, fingerprint)
             if payload is not None:
-                result = self._convert_result(fingerprint, payload)
-                self.state.record(fingerprint, result)
-                return result
+                return self._result_from_payload(
+                    bridge_dir=bridge_dir,
+                    fingerprint=fingerprint,
+                    payload=payload,
+                )
             time.sleep(0.1)
 
         ambiguous = ExecutionResult(
