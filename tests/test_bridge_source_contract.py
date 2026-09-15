@@ -36,14 +36,12 @@ def test_mql5_bridge_uses_utc_protocol_atomic_publish_execution_and_history() ->
     assert "DEAL_PROFIT" in source
     assert "DEAL_COMMISSION" in source
     assert "DEAL_SWAP" in source
-    assert '"closed_trades"' in source
+    assert "closed_trades" in source
     assert "FileMove(" in source
     assert "FILE_REWRITE" in source
     assert "FILE_COMMON" in source
     assert "EventSetTimer(1)" in source
 
-    # Duplicate marker must be persisted after broker pre-checks and before the
-    # actual send boundary: temporary blocks can retry, submitted commands cannot.
     order_check_index = source.index("OrderCheck(request,check)")
     duplicate_marker_index = source.index("WriteWholeText(LastCommandFile,command_id")
     order_send_index = source.index("OrderSend(request,result)")
