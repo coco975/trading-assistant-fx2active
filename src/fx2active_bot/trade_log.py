@@ -66,6 +66,27 @@ class TradeLogStore:
             return "Loss"
         return "Breakeven"
 
+    @staticmethod
+    def _normalize_timestamp(value: Any, fallback: str) -> str:
+        if value is None or value == "":
+            return fallback
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return fallback
+        text = str(value).strip()
+        try:
+            numeric = float(text)
+        except ValueError:
+            return text
+        if numeric > 10_000_000:
+            try:
+                return datetime.fromtimestamp(numeric, tz=timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError):
+                return fallback
+        return text
+
     def capture_status(self, status: dict[str, Any]) -> None:
         """Record new setup, execution and broker-close events from runtime status."""
 
@@ -153,13 +174,13 @@ class TradeLogStore:
                 continue
             deal_ticket = closed.get("deal_ticket")
             position_id = closed.get("position_id")
-            closed_at = closed.get("timestamp_utc") or timestamp
+            closed_at = self._normalize_timestamp(closed.get("timestamp_utc"), timestamp)
             key_suffix = deal_ticket or f"{position_id}|{closed_at}|{closed.get('price')}"
             net_profit = closed.get("net_profit")
             pending.append(
                 {
                     "event_key": f"closed|{key_suffix}",
-                    "timestamp_utc": str(closed_at),
+                    "timestamp_utc": closed_at,
                     "event": "Closed",
                     "symbol": closed.get("symbol") or symbol,
                     "side": closed.get("side"),
