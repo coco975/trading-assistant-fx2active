@@ -73,8 +73,6 @@ class ExecutionStateStore:
         )
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                # Preserve insertion order so bounded-state pruning removes the
-                # oldest processed fingerprints rather than lexical key order.
                 json.dump(payload, handle, indent=2)
                 handle.write("\n")
                 handle.flush()
@@ -96,6 +94,8 @@ def setup_fingerprint(symbol: str, setup: Any, execution_mode: str) -> str:
             f"{float(getattr(setup, 'take_profit')):.10f}",
             f"{float(getattr(setup, 'swing_low')):.10f}",
             f"{float(getattr(setup, 'swing_high')):.10f}",
+            str(getattr(setup, "swing_low_time", "") or ""),
+            str(getattr(setup, "swing_high_time", "") or ""),
         )
     )
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
