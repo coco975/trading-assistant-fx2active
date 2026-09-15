@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
 import platform
 import subprocess
 import sys
-from importlib import metadata
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,19 +31,6 @@ REQUIRED_PROJECT_FILES = (
 )
 
 
-def ask_yes_no(question: str, *, default: bool = False) -> bool:
-    suffix = "[Y/n]" if default else "[y/N]"
-    while True:
-        answer = input(f"{question} {suffix}: ").strip().lower()
-        if not answer:
-            return default
-        if answer in {"y", "yes"}:
-            return True
-        if answer in {"n", "no"}:
-            return False
-        print("Please type Y or N.")
-
-
 def verify_project_layout() -> bool:
     missing = [relative for relative in REQUIRED_PROJECT_FILES if not (ROOT / relative).is_file()]
     if missing:
@@ -56,47 +43,30 @@ def verify_project_layout() -> bool:
     return True
 
 
-def project_is_installed() -> bool:
-    try:
-        metadata.version("trading-assistant-fx2active")
-        return True
-    except metadata.PackageNotFoundError:
-        return False
-
-
 def ensure_python_packages() -> None:
-    system = platform.system()
-    mt5_missing = system == "Windows" and importlib.util.find_spec("MetaTrader5") is None
-    project_missing = not project_is_installed()
+    """Install only the external runtime package that Windows actually needs.
 
-    if not mt5_missing and not project_missing:
-        print("[OK] Required Python packages are already installed.")
+    The repository itself is imported directly from src/, so macOS can start
+    offline once Python is present. Windows needs MetaTrader5 for direct terminal
+    IPC; install it into the private .venv automatically when missing.
+    """
+
+    if platform.system() != "Windows":
+        print("[OK] No external Python runtime packages are required on macOS.")
         return
 
-    print("\n[SETUP] This bot needs its local Python runtime prepared.")
-    if project_missing:
-        print(
-            "  - FX2Active project package: registers this repository inside the "
-            "private .venv so the launcher can import the bot reliably."
-        )
-    if mt5_missing:
-        print(
-            "  - MetaTrader5: the Windows Python bridge used to read MT5 prices, "
-            "account state and positions."
-        )
-    if system == "Darwin":
-        print(
-            "  - macOS uses the FX2Active MQL5 bridge inside MetaTrader instead of "
-            "the Windows-only MetaTrader5 Python IPC package."
-        )
-    print("\nInstallation is limited to this bot's .venv folder, not system-wide.")
-    if not ask_yes_no("Prepare the bot's required Python packages now?"):
-        raise SystemExit("Setup cancelled before installing dependencies.")
+    if importlib.util.find_spec("MetaTrader5") is not None:
+        print("[OK] MetaTrader5 Python bridge is already installed.")
+        return
 
-    cmd = [sys.executable, "-m", "pip", "install", "-e", str(ROOT)]
-    print("\nInstalling required packages...")
-    subprocess.check_call(cmd)
-    print("[OK] Python runtime prepared.")
+    print("[SETUP] Installing the official MetaTrader5 Python bridge into .venv...")
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "MetaTrader5>=5.0.45"]
+    )
+    importlib.invalidate_caches()
+    if importlib.util.find_spec("MetaTrader5") is None:
+        raise RuntimeError("MetaTrader5 installed but could not be imported")
+    print("[OK] MetaTrader5 Python bridge installed.")
 
 
 def prepare_macos_bridge() -> None:
@@ -159,8 +129,8 @@ def main() -> int:
         print(f"[ERROR] Python package setup failed with exit code {exc.returncode}.")
         print("Check the internet connection, then run the launcher again.")
         return 1
-    except OSError as exc:
-        print(f"[ERROR] Python package setup could not run: {exc}")
+    except (OSError, RuntimeError) as exc:
+        print(f"[ERROR] Python package setup could not complete: {exc}")
         return 1
 
     prepare_macos_bridge()
