@@ -11,6 +11,8 @@ def test_required_startup_files_exist() -> None:
         "bridge/FX2ActiveBridge.mq5",
         "scripts/bootstrap.py",
         "scripts/run_fx2active.py",
+        "src/fx2active_bot/mac_setup.py",
+        "src/fx2active_bot/trade_log.py",
         "web/index.html",
         "web/app.js",
         "web/styles.css",
@@ -52,3 +54,15 @@ def test_bootstrap_has_project_preflight_and_mt5_specific_dependency_setup() -> 
     assert "REQUIRED_PROJECT_FILES" in bootstrap
     assert 'platform.system() != "Windows"' in bootstrap
     assert '"MetaTrader5>=5.0.45"' in bootstrap
+
+
+def test_bootstrap_automates_mac_bridge_folder_and_compile_preparation() -> None:
+    bootstrap = (ROOT / "scripts" / "bootstrap.py").read_text(encoding="utf-8")
+    mac_setup = (ROOT / "src" / "fx2active_bot" / "mac_setup.py").read_text(encoding="utf-8")
+
+    assert "prepare_mac_bridge" in bootstrap
+    assert "created/updated the Experts/FX2Active folder" in bootstrap
+    assert '"MQL5" / "Experts" / mac_bridge.BRIDGE_DIR_NAME' in mac_setup
+    assert 'f"/compile:{windows_source}"' in mac_setup
+    assert '"WINEPREFIX"' in mac_setup
+    assert "sudo" not in mac_setup
