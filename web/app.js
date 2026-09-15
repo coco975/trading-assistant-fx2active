@@ -2,6 +2,7 @@ const ids = [
   'trading_enabled','allow_buys','allow_sells','symbol','fib_enabled','fib_retracement',
   'stop_buffer_pips','take_profit_mode','entry_trigger','max_open_positions',
   'sizing_mode','risk_percent','fixed_lot','fixed_cash_risk','execution_mode',
+  'live_execution_enabled','allow_live_account','max_spread_pips','max_deviation_points',
   'support_resistance','previous_swing','trendline','psychological_level',
   'candle_confirmation','min_confirmations'
 ];
@@ -30,7 +31,7 @@ function updateExecutionHelp() {
   const pending = $('execution_mode').value === 'pending_limit';
   $('entry_trigger').disabled = pending;
   $('execution-help').innerHTML = pending
-    ? '<span>Pending limit</span><span>Order price = 78.6% Fib</span>'
+    ? '<span>Pending limit</span><span>Places the order at the 78.6% Fib price</span>'
     : '<span>Market mode</span><span>Uses the Entry confirmation above</span>';
 }
 
@@ -50,6 +51,10 @@ function setForm(s) {
   $('fixed_lot').value = s.fixed_lot ?? 0.01;
   $('fixed_cash_risk').value = s.fixed_cash_risk ?? 10;
   $('execution_mode').value = s.execution_mode || 'market_on_trigger';
+  $('live_execution_enabled').checked = s.live_execution_enabled ?? false;
+  $('allow_live_account').checked = s.allow_live_account ?? false;
+  $('max_spread_pips').value = s.max_spread_pips ?? 0;
+  $('max_deviation_points').value = s.max_deviation_points ?? 20;
   $('support_resistance').checked = s.poi.support_resistance;
   $('previous_swing').checked = s.poi.previous_swing;
   $('trendline').checked = s.poi.trendline;
@@ -78,6 +83,10 @@ function getForm() {
     fixed_lot: Number($('fixed_lot').value),
     fixed_cash_risk: Number($('fixed_cash_risk').value),
     execution_mode: $('execution_mode').value,
+    live_execution_enabled: $('live_execution_enabled').checked,
+    allow_live_account: $('allow_live_account').checked,
+    max_spread_pips: Number($('max_spread_pips').value),
+    max_deviation_points: Number($('max_deviation_points').value),
     poi: {
       support_resistance: $('support_resistance').checked,
       previous_swing: $('previous_swing').checked,
@@ -117,10 +126,20 @@ async function loadSystemStatus() {
       ? `${s.account_server || 'Logged in'} ${s.account_login_masked || ''}`.trim()
       : 'Not logged in';
 
-    $('position-text').textContent = s.open_positions == null
-      ? '—'
-      : `${s.open_positions} / ${s.max_open_positions}`;
-    $('system-message').textContent = s.message || 'Local system running';
+    if (s.open_positions == null) {
+      $('position-text').textContent = '—';
+    } else {
+      const pending = s.pending_orders ?? 0;
+      $('position-text').textContent = `${s.open_positions} position(s) + ${pending} pending / ${s.max_open_positions}`;
+    }
+
+    let message = s.message || 'Local system running';
+    if (s.execution_result?.order_ticket) {
+      message += ` Order #${s.execution_result.order_ticket}`;
+    } else if (s.execution_result?.deal_ticket) {
+      message += ` Deal #${s.execution_result.deal_ticket}`;
+    }
+    $('system-message').textContent = message;
   } catch (e) {
     setHealth('worker-health', false);
     setHealth('mt5-health', false);
