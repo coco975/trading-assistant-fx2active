@@ -43,7 +43,7 @@ def write_order_command(bridge_dir: Path, payload: dict[str, Any]) -> Path:
         f"tp={float(payload['tp']):.10f}",
         f"deviation={int(payload['deviation'])}",
         f"max_spread_pips={float(payload['max_spread_pips']):.4f}",
-        f"max_exposure={int(payload['max_exposure'])}",
+        f"max_exposure={int(payload.get('max_exposure', 1))}",
         f"allow_live={1 if payload['allow_live'] else 0}",
         f"magic={FX2ACTIVE_MAGIC}",
         f"comment={FX2ACTIVE_COMMENT}",
