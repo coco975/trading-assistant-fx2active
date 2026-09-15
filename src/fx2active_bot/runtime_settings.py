@@ -166,12 +166,30 @@ class RuntimeSettings:
 
 
 class RuntimeSettingsStore:
+    """Persist user settings outside tracked repository files.
+
+    Existing callers still pass config/runtime_settings.json. That file now acts
+    as a versioned defaults/template file, while mutable settings are stored in
+    data/runtime/runtime_settings.json (already ignored by Git). This prevents
+    normal dashboard changes from blocking future git pulls.
+    """
+
     def __init__(self, path: str | Path) -> None:
-        self.path = Path(path)
+        requested = Path(path)
+        self.template_path: Path | None = None
+        if requested.name == "runtime_settings.json" and requested.parent.name == "config":
+            self.template_path = requested
+            self.path = requested.parent.parent / "data" / "runtime" / "runtime_settings.json"
+        else:
+            self.path = requested
 
     def load(self) -> RuntimeSettings:
         if not self.path.exists():
-            settings = RuntimeSettings()
+            if self.template_path is not None and self.template_path.exists():
+                data = json.loads(self.template_path.read_text(encoding="utf-8"))
+                settings = RuntimeSettings.from_dict(data)
+            else:
+                settings = RuntimeSettings()
             self.save(settings)
             return settings
         data = json.loads(self.path.read_text(encoding="utf-8"))
