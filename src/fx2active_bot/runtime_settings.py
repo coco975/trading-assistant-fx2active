@@ -42,8 +42,12 @@ class RuntimeSettings:
     fixed_lot: float = 0.01
     fixed_cash_risk: float = 10.0
 
-    # This controls how a qualified setup should eventually be submitted to MT5.
+    # Broker execution remains separately armed from the strategy master switch.
     execution_mode: str = "market_on_trigger"
+    live_execution_enabled: bool = False
+    allow_live_account: bool = False
+    max_spread_pips: float = 0.0
+    max_deviation_points: int = 20
 
     poi: PoiSettings = field(default_factory=PoiSettings)
 
@@ -72,6 +76,10 @@ class RuntimeSettings:
             raise ValueError("fixed_cash_risk must be positive")
         if self.execution_mode not in {"market_on_trigger", "pending_limit"}:
             raise ValueError("unsupported execution_mode")
+        if not 0 <= self.max_spread_pips <= 10000:
+            raise ValueError("max_spread_pips must be between 0 and 10000")
+        if not 0 <= self.max_deviation_points <= 10000:
+            raise ValueError("max_deviation_points must be between 0 and 10000")
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RuntimeSettings":
@@ -95,6 +103,10 @@ class RuntimeSettings:
         payload.setdefault("fixed_lot", 0.01)
         payload.setdefault("fixed_cash_risk", 10.0)
         payload.setdefault("execution_mode", "market_on_trigger")
+        payload.setdefault("live_execution_enabled", False)
+        payload.setdefault("allow_live_account", False)
+        payload.setdefault("max_spread_pips", 0.0)
+        payload.setdefault("max_deviation_points", 20)
         payload["symbol"] = str(payload["symbol"]).strip()
 
         return cls(**payload, poi=PoiSettings(**poi_data))
