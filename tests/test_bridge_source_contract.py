@@ -4,14 +4,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_mql5_bridge_uses_utc_protocol_atomic_publish_and_execution_channel() -> None:
+def test_mql5_bridge_uses_utc_protocol_atomic_publish_execution_and_history() -> None:
     source = (ROOT / "bridge" / "FX2ActiveBridge.mq5").read_text(encoding="utf-8")
 
     assert "FX2ACTIVE_PROTOCOL_VERSION 2" in source
     assert "FX2ACTIVE_ORDER_PROTOCOL 1" in source
     assert "FX2ACTIVE_MAGIC 26091501" in source
-    assert 'BridgeVersion = "1.22"' in source
-    assert '#property version   "1.22"' in source
+    assert 'BridgeVersion = "1.23"' in source
+    assert '#property version   "1.23"' in source
     assert "TimeGMT()" in source
     assert "TimeLocal()" not in source
     assert "SnapshotTempFile" in source
@@ -30,6 +30,13 @@ def test_mql5_bridge_uses_utc_protocol_atomic_publish_and_execution_channel() ->
     assert "SYMBOL_VOLUME_MIN" in source
     assert "SYMBOL_VOLUME_MAX" in source
     assert "SYMBOL_VOLUME_STEP" in source
+    assert "HistorySelect(" in source
+    assert "HistoryDealsTotal()" in source
+    assert "DEAL_ENTRY_OUT" in source
+    assert "DEAL_PROFIT" in source
+    assert "DEAL_COMMISSION" in source
+    assert "DEAL_SWAP" in source
+    assert '"closed_trades"' in source
     assert "FileMove(" in source
     assert "FILE_REWRITE" in source
     assert "FILE_COMMON" in source
@@ -46,7 +53,7 @@ def test_mql5_bridge_uses_utc_protocol_atomic_publish_and_execution_channel() ->
 def test_python_bridge_version_matches_mql_source() -> None:
     from fx2active_bot.mac_bridge import BRIDGE_SOURCE_VERSION
 
-    assert BRIDGE_SOURCE_VERSION == "1.22"
+    assert BRIDGE_SOURCE_VERSION == "1.23"
 
 
 def test_python_live_execution_is_isolated_to_trade_executor() -> None:
