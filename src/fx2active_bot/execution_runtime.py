@@ -4,6 +4,7 @@ import json
 import platform
 import threading
 import webbrowser
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -12,7 +13,6 @@ from .local_runtime import LocalRuntimeMonitor, detect_lan_ipv4
 from .mac_bridge import bridge_loss_per_one_lot, load_snapshot, snapshot_is_fresh, write_requested_symbol
 from .mac_trade_executor import MacTradeExecutor
 from .position_sizing import calculate_position_size
-from .runtime_settings import RuntimeSettingsStore
 from .system_diagnostics import run_diagnostics
 from .trade_executor import WindowsTradeExecutor, count_bot_exposure
 from .web_server import ControlPanelServer
@@ -304,6 +304,7 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         settings = self.store.load()
         payload: dict[str, Any] = {
             "worker_online": True,
+            "heartbeat_at": datetime.now(timezone.utc).isoformat(),
             "runtime_platform": platform.system(),
             "trading_enabled": settings.trading_enabled,
             "live_execution_enabled": settings.live_execution_enabled,
