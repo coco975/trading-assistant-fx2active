@@ -36,7 +36,9 @@ class FakeMT5:
         self.positions = []
         self.orders = []
         self.tick = SimpleNamespace(bid=100.0, ask=100.1)
+        self.terminal = SimpleNamespace(connected=True, trade_allowed=True, tradeapi_disabled=False)
         self.check_retcode = 0
+        self.margin_required = 10.0
         self.send_results = [
             SimpleNamespace(
                 retcode=self.TRADE_RETCODE_DONE,
@@ -48,6 +50,9 @@ class FakeMT5:
             )
         ]
 
+    def terminal_info(self):
+        return self.terminal
+
     def positions_get(self, symbol=None):
         return self.positions
 
@@ -58,7 +63,7 @@ class FakeMT5:
         return self.tick
 
     def order_calc_margin(self, order_type, symbol, volume, price):
-        return 10.0
+        return self.margin_required
 
     def order_check(self, request):
         self.checked.append(dict(request))
@@ -66,6 +71,8 @@ class FakeMT5:
 
     def order_send(self, request):
         self.sent.append(dict(request))
+        if not self.send_results:
+            return None
         return self.send_results.pop(0)
 
     def last_error(self):
@@ -92,21 +99,23 @@ def setup(side="BUY"):
     )
 
 
-def info():
-    return SimpleNamespace(
-        digits=2,
-        point=0.01,
-        trade_stops_level=0,
-        filling_mode=2,
-        trade_exemode=2,
-    )
+def info(**overrides):
+    values = {
+        "digits": 2,
+        "point": 0.01,
+        "trade_stops_level": 0,
+        "filling_mode": 2,
+        "trade_exemode": 2,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
-def account(*, real=False):
+def account(*, real=False, margin_free=1000.0):
     return SimpleNamespace(
         trade_mode=2 if real else 0,
         trade_allowed=True,
-        margin_free=1000.0,
+        margin_free=margin_free,
     )
 
 
@@ -124,19 +133,23 @@ def settings(**overrides):
     return RuntimeSettings(**values)
 
 
+def execute(executor, mt5, *, cfg=None, trade=None, acct=None, symbol_info=None):
+    return executor.execute(
+        mt5=mt5,
+        settings=cfg or settings(),
+        symbol="XAUUSDm",
+        setup=trade or setup("BUY"),
+        volume=0.1,
+        pip_size=0.01,
+        account=acct or account(),
+        symbol_info=symbol_info or info(),
+    )
+
+
 def test_market_buy_runs_order_check_then_order_send(tmp_path):
     mt5 = FakeMT5()
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(),
-        symbol="XAUUSDm",
-        setup=setup("BUY"),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(),
-        symbol_info=info(),
-    )
+    result = execute(executor, mt5)
 
     assert result.ok is True
     assert result.status == "filled"
@@ -154,17 +167,12 @@ def test_market_buy_runs_order_check_then_order_send(tmp_path):
 
 def test_pending_sell_uses_limit_order_at_fib_price(tmp_path):
     mt5 = FakeMT5()
-    mt5.tick = SimpleNamespace(bid=100.0, ask=100.1)
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(execution_mode="pending_limit"),
-        symbol="XAUUSDm",
-        setup=setup("SELL"),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(),
-        symbol_info=info(),
+    result = execute(
+        executor,
+        mt5,
+        cfg=settings(execution_mode="pending_limit"),
+        trade=setup("SELL"),
     )
 
     assert result.ok is True
@@ -175,19 +183,39 @@ def test_pending_sell_uses_limit_order_at_fib_price(tmp_path):
     assert request["type_filling"] == mt5.ORDER_FILLING_RETURN
 
 
+def test_execution_disabled_never_checks_or_sends(tmp_path):
+    mt5 = FakeMT5()
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5, cfg=settings(live_execution_enabled=False))
+    assert result.status == "disabled"
+    assert mt5.checked == []
+    assert mt5.sent == []
+
+
+def test_terminal_autotrading_off_blocks_before_broker_request(tmp_path):
+    mt5 = FakeMT5()
+    mt5.terminal = SimpleNamespace(connected=True, trade_allowed=False, tradeapi_disabled=False)
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5)
+    assert result.status == "blocked"
+    assert mt5.checked == []
+    assert mt5.sent == []
+
+
+def test_external_python_api_block_is_detected(tmp_path):
+    mt5 = FakeMT5()
+    mt5.terminal = SimpleNamespace(connected=True, trade_allowed=True, tradeapi_disabled=True)
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5)
+    assert result.status == "blocked"
+    assert "Python" in result.message
+    assert mt5.sent == []
+
+
 def test_real_account_is_blocked_until_explicitly_allowed(tmp_path):
     mt5 = FakeMT5()
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(allow_live_account=False),
-        symbol="XAUUSDm",
-        setup=setup(),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(real=True),
-        symbol_info=info(),
-    )
+    result = execute(executor, mt5, acct=account(real=True))
 
     assert result.ok is False
     assert result.status == "blocked"
@@ -197,15 +225,11 @@ def test_real_account_is_blocked_until_explicitly_allowed(tmp_path):
 def test_real_account_can_execute_when_double_armed(tmp_path):
     mt5 = FakeMT5()
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(allow_live_account=True),
-        symbol="XAUUSDm",
-        setup=setup(),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(real=True),
-        symbol_info=info(),
+    result = execute(
+        executor,
+        mt5,
+        cfg=settings(allow_live_account=True),
+        acct=account(real=True),
     )
     assert result.ok is True
     assert len(mt5.sent) == 1
@@ -214,18 +238,8 @@ def test_real_account_can_execute_when_double_armed(tmp_path):
 def test_duplicate_setup_is_not_submitted_twice(tmp_path):
     mt5 = FakeMT5()
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    kwargs = dict(
-        mt5=mt5,
-        settings=settings(),
-        symbol="XAUUSDm",
-        setup=setup(),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(),
-        symbol_info=info(),
-    )
-    first = executor.execute(**kwargs)
-    second = executor.execute(**kwargs)
+    first = execute(executor, mt5)
+    second = execute(executor, mt5)
     assert first.ok is True
     assert second.status == "duplicate"
     assert len(mt5.sent) == 1
@@ -235,16 +249,7 @@ def test_spread_guard_blocks_before_order_check(tmp_path):
     mt5 = FakeMT5()
     mt5.tick = SimpleNamespace(bid=100.0, ask=100.5)
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(max_spread_pips=10.0),
-        symbol="XAUUSDm",
-        setup=setup(),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(),
-        symbol_info=info(),
-    )
+    result = execute(executor, mt5, cfg=settings(max_spread_pips=10.0))
     assert result.status == "blocked"
     assert mt5.checked == []
     assert mt5.sent == []
@@ -254,19 +259,101 @@ def test_order_check_failure_never_calls_order_send(tmp_path):
     mt5 = FakeMT5()
     mt5.check_retcode = 10016
     executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
-    result = executor.execute(
-        mt5=mt5,
-        settings=settings(),
-        symbol="XAUUSDm",
-        setup=setup(),
-        volume=0.1,
-        pip_size=0.01,
-        account=account(),
-        symbol_info=info(),
-    )
+    result = execute(executor, mt5)
     assert result.status == "blocked"
     assert len(mt5.checked) >= 1
     assert mt5.sent == []
+
+
+def test_insufficient_margin_blocks_before_order_check(tmp_path):
+    mt5 = FakeMT5()
+    mt5.margin_required = 200.0
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5, acct=account(margin_free=100.0))
+    assert result.status == "blocked"
+    assert "margin" in result.message.lower()
+    assert mt5.checked == []
+    assert mt5.sent == []
+
+
+def test_broker_stop_distance_blocks_invalid_order(tmp_path):
+    mt5 = FakeMT5()
+    tight = SimpleNamespace(
+        side="BUY",
+        entry=100.0,
+        stop_loss=100.05,
+        take_profit=100.15,
+        swing_low=99.9,
+        swing_high=100.15,
+    )
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5, trade=tight, symbol_info=info(trade_stops_level=10))
+    assert result.status == "blocked"
+    assert mt5.sent == []
+
+
+def test_safe_price_retry_refreshes_market_price_once(tmp_path):
+    mt5 = FakeMT5()
+    mt5.send_results = [
+        SimpleNamespace(
+            retcode=mt5.TRADE_RETCODE_PRICE_CHANGED,
+            order=0,
+            deal=0,
+            volume=0.0,
+            price=0.0,
+            comment="Price changed",
+        ),
+        SimpleNamespace(
+            retcode=mt5.TRADE_RETCODE_DONE,
+            order=321,
+            deal=654,
+            volume=0.1,
+            price=100.2,
+            comment="Done",
+        ),
+    ]
+    ticks = [
+        SimpleNamespace(bid=100.0, ask=100.1),
+        SimpleNamespace(bid=100.1, ask=100.2),
+    ]
+    mt5.symbol_info_tick = lambda symbol: ticks.pop(0) if ticks else SimpleNamespace(bid=100.1, ask=100.2)
+
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    result = execute(executor, mt5)
+    assert result.ok is True
+    assert len(mt5.sent) == 2
+    assert mt5.sent[1]["price"] == 100.2
+
+
+def test_ambiguous_none_result_is_persisted_and_not_retried(tmp_path):
+    mt5 = FakeMT5()
+    mt5.send_results = []
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    first = execute(executor, mt5)
+    second = execute(executor, mt5)
+    assert first.status == "ambiguous"
+    assert second.status == "duplicate"
+    assert len(mt5.sent) == 1
+
+
+def test_definitive_broker_rejection_is_persisted(tmp_path):
+    mt5 = FakeMT5()
+    mt5.send_results = [
+        SimpleNamespace(
+            retcode=10030,
+            order=0,
+            deal=0,
+            volume=0.0,
+            price=0.0,
+            comment="Rejected",
+        )
+    ]
+    executor = WindowsTradeExecutor(state_path=tmp_path / "state.json")
+    first = execute(executor, mt5)
+    second = execute(executor, mt5)
+    assert first.status == "rejected"
+    assert second.status == "duplicate"
+    assert len(mt5.sent) == 1
 
 
 def test_bot_exposure_ignores_manual_positions_and_orders():
