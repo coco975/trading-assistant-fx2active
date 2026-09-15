@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .mac_bridge import BRIDGE_SOURCE_VERSION
 from .trade_executor import (
     FX2ACTIVE_COMMENT,
     FX2ACTIVE_MAGIC,
@@ -117,15 +118,29 @@ class MacTradeExecutor:
                 fingerprint,
             )
 
+        bridge_version = str(snapshot.get("bridge_version", ""))
+        if not bool(snapshot.get("execution_bridge")) or bridge_version != BRIDGE_SOURCE_VERSION:
+            return ExecutionResult(
+                False,
+                "blocked",
+                f"The attached MT5 bridge is not the current trade-capable v{BRIDGE_SOURCE_VERSION}. "
+                "Compile and attach the latest FX2ActiveBridge first.",
+                fingerprint,
+            )
+
         account = snapshot.get("account") if isinstance(snapshot.get("account"), dict) else {}
         terminal = snapshot.get("terminal") if isinstance(snapshot.get("terminal"), dict) else {}
         if not bool(terminal.get("connected")):
             return ExecutionResult(False, "blocked", "MT5 terminal is not connected.", fingerprint)
-        if not bool(terminal.get("trade_allowed")) or not bool(account.get("trade_allowed")):
+        if (
+            not bool(terminal.get("trade_allowed"))
+            or not bool(account.get("trade_allowed"))
+            or not bool(account.get("trade_expert"))
+        ):
             return ExecutionResult(
                 False,
                 "blocked",
-                "MT5 Algo Trading/account trading permission is disabled.",
+                "MT5 Algo Trading/account Expert Advisor trading permission is disabled.",
                 fingerprint,
             )
 
@@ -157,7 +172,7 @@ class MacTradeExecutor:
         point = float(symbol_info.get("point", 0.0) or 0.0)
         digits = int(symbol_info.get("digits", 0) or 0)
         pip_size = point * 10 if digits in {3, 5} else point
-        if bid <= 0 or ask <= 0 or point <= 0:
+        if bid <= 0 or ask <= 0 or ask < bid or point <= 0:
             return ExecutionResult(False, "error", "MT5 bridge returned invalid market prices.", fingerprint)
         spread_pips = (ask - bid) / pip_size
         if settings.max_spread_pips > 0 and spread_pips > settings.max_spread_pips:
