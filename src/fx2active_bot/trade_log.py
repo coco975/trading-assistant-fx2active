@@ -216,3 +216,34 @@ class TradeLogStore:
                 changed = True
             if changed:
                 self._save_unlocked(items)
+
+
+def follow_runtime_status(
+    status_path: str | Path,
+    log_path: str | Path,
+    stop_event: threading.Event,
+    *,
+    poll_seconds: float = 0.5,
+) -> None:
+    """Persist runtime trade events even when no browser dashboard is open."""
+
+    status_file = Path(status_path)
+    store = TradeLogStore(log_path)
+    last_signature: tuple[int, int] | None = None
+
+    while not stop_event.is_set():
+        try:
+            stat = status_file.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            if signature != last_signature:
+                payload = json.loads(status_file.read_text(encoding="utf-8"))
+                if isinstance(payload, dict):
+                    store.capture_status(payload)
+                last_signature = signature
+        except FileNotFoundError:
+            pass
+        except (OSError, json.JSONDecodeError, RuntimeError):
+            # Status writes are atomic, but a transient filesystem failure or a
+            # damaged optional history file must never stop trading/runtime health.
+            pass
+        stop_event.wait(poll_seconds)
