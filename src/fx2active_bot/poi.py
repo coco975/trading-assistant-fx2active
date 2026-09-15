@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Protocol
 
 from .fibonacci import BearishFibLevels, BullishFibLevels
 from .models import Candle
@@ -93,19 +94,19 @@ class ConfigurablePOIRule:
                 for i in range(2, max(2, len(candles) - 2))
                 if is_swing_low(candles, i)
             ]
-            price = lambda i: candles[i].low
+            prices = [candles[index].low for index in indices]
         else:
             indices = [
                 i
                 for i in range(2, max(2, len(candles) - 2))
                 if is_swing_high(candles, i)
             ]
-            price = lambda i: candles[i].high
+            prices = [candles[index].high for index in indices]
 
         if len(indices) < 2:
             return False
         i1, i2 = indices[-2], indices[-1]
-        p1, p2 = price(i1), price(i2)
+        p1, p2 = prices[-2], prices[-1]
         slope = (p2 - p1) / (i2 - i1)
         projected = p2 + slope * ((len(candles) - 1) - i2)
         return self._near(projected, entry)
