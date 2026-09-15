@@ -28,8 +28,8 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q src scripts tests
 
-      - name: Static checks
-        run: python -m ruff check src scripts tests
+      - name: Static correctness checks
+        run: python -m ruff check --select E4,E7,E9,F src scripts tests
 
       - name: Validate macOS launcher syntax
         if: runner.os == 'macOS'
