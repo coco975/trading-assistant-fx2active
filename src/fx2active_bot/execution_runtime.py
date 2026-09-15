@@ -53,6 +53,7 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         setup = strategy.find_setup(
             candles,
             current_open_positions=int(payload.get("bot_exposure", 0) or 0),
+            current_bar_is_open=True,
         )
         if setup is None:
             if not settings.trading_enabled:
@@ -107,17 +108,6 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
             )
         elif system == "Darwin":
             snapshot = self.execution_context["snapshot"]
-            if not bool(snapshot.get("execution_bridge")):
-                payload["message"] = (
-                    "The attached macOS FX2ActiveBridge is read-only/outdated. "
-                    "Compile the latest bridge before enabling order execution."
-                )
-                payload["execution_result"] = {
-                    "ok": False,
-                    "status": "blocked",
-                    "message": payload["message"],
-                }
-                return payload
             result = self.mac_executor.execute(
                 settings=settings,
                 symbol=symbol,
@@ -133,16 +123,6 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         payload["execution_result"] = result.to_dict()
         payload["message"] = f"{symbol}: {result.message}"
         return payload
-
-    @staticmethod
-    def _count_all_magic(mt5: Any) -> tuple[int, int]:
-        from .trade_executor import FX2ACTIVE_MAGIC
-
-        positions = mt5.positions_get()
-        orders = mt5.orders_get()
-        pos = sum(1 for item in positions or () if int(getattr(item, "magic", 0) or 0) == FX2ACTIVE_MAGIC)
-        pending = sum(1 for item in orders or () if int(getattr(item, "magic", 0) or 0) == FX2ACTIVE_MAGIC)
-        return pos, pending
 
     def _snapshot_windows(self, payload: dict[str, Any], settings: Any) -> dict[str, Any]:
         import MetaTrader5 as mt5
@@ -163,16 +143,18 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
                 payload["account_currency"] = getattr(account, "currency", None)
                 payload["account_balance"] = float(getattr(account, "balance", 0.0) or 0.0)
                 payload["account_equity"] = float(getattr(account, "equity", 0.0) or 0.0)
-                payload["trade_allowed"] = bool(getattr(account, "trade_allowed", False))
+                payload["account_trade_expert"] = bool(getattr(account, "trade_expert", True))
+                payload["trade_allowed"] = bool(getattr(account, "trade_allowed", False)) and payload[
+                    "account_trade_expert"
+                ]
                 payload["account_trade_mode"] = getattr(account, "trade_mode", None)
 
             all_positions = mt5.positions_get()
-            payload["account_total_open_positions"] = len(all_positions) if all_positions is not None else 0
+            payload["account_total_open_positions"] = len(all_positions) if all_positions is not None else None
 
-            if settings.symbol:
-                bot_positions, bot_pending = count_bot_exposure(mt5, settings.symbol)
-            else:
-                bot_positions, bot_pending = self._count_all_magic(mt5)
+            # The limit applies to all FX2Active-owned exposure, not just the
+            # currently selected symbol. Switching symbols must not bypass it.
+            bot_positions, bot_pending = count_bot_exposure(mt5)
             payload["open_positions"] = bot_positions
             payload["pending_orders"] = bot_pending
             payload["bot_exposure"] = bot_positions + bot_pending
@@ -241,6 +223,7 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
 
         snapshot, snapshot_path = load_snapshot()
         payload["mt5_bridge"] = str(snapshot_path)
+        payload["mt5_bridge_version"] = snapshot.get("bridge_version")
         if not snapshot_is_fresh(snapshot):
             payload["message"] = "The macOS MT5 bridge is not updating. Keep FX2ActiveBridge attached."
             return payload
@@ -255,7 +238,13 @@ class ExecutionRuntimeMonitor(LocalRuntimeMonitor):
         payload["account_balance"] = float(account.get("balance", 0.0) or 0.0)
         payload["account_equity"] = float(account.get("equity", 0.0) or 0.0)
         payload["account_trade_mode"] = account.get("trade_mode")
-        payload["trade_allowed"] = bool(account.get("trade_allowed")) and bool(terminal.get("trade_allowed"))
+        account_expert = bool(account.get("trade_expert", account.get("trade_allowed")))
+        payload["account_trade_expert"] = account_expert
+        payload["trade_allowed"] = (
+            bool(account.get("trade_allowed"))
+            and account_expert
+            and bool(terminal.get("trade_allowed"))
+        )
         payload["account_total_open_positions"] = int(snapshot.get("open_positions", 0) or 0)
         payload["open_positions"] = int(snapshot.get("fx2active_open_positions", 0) or 0)
         payload["pending_orders"] = int(snapshot.get("fx2active_pending_orders", 0) or 0)
