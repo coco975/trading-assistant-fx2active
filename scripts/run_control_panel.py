@@ -1,9 +1,12 @@
+import sys
 from pathlib import Path
 
-from fx2active_bot.web_server import ControlPanelServer
-
-
 ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from fx2active_bot.web_server import ControlPanelServer  # noqa: E402
 
 
 if __name__ == "__main__":
