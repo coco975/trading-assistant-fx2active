@@ -116,7 +116,7 @@ goto :start_bot
 :lan_access
 set "FX2ACTIVE_ACCESS_MODE=lan"
 set "FX2ACTIVE_DASHBOARD_PIN="
-for /f "delims=" %%P in ('".venv\Scripts\python.exe" -c "import secrets; print(secrets.randbelow(900000)+100000)"') do set "FX2ACTIVE_DASHBOARD_PIN=%%P"
+for /f "delims=" %%P in ('%PY_CMD% -c "import secrets; print(secrets.randbelow(900000)+100000)"') do set "FX2ACTIVE_DASHBOARD_PIN=%%P"
 if not defined FX2ACTIVE_DASHBOARD_PIN (
   echo [ERROR] Could not generate the private dashboard access PIN.
   pause
