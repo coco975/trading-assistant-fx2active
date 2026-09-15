@@ -11,7 +11,7 @@ from typing import Any, Iterator
 
 BRIDGE_DIR_NAME = "FX2Active"
 BRIDGE_PROTOCOL_VERSION = 2
-BRIDGE_SOURCE_VERSION = "1.21"
+BRIDGE_SOURCE_VERSION = "1.22"
 BRIDGE_SOURCE_FILE = "FX2ActiveBridge.mq5"
 BRIDGE_BINARY_FILE = "FX2ActiveBridge.ex5"
 SNAPSHOT_FILE = "snapshot.json"
