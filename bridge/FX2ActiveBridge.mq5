@@ -1,5 +1,5 @@
 #property strict
-#property version   "1.21"
+#property version   "1.22"
 #property description "FX2Active local bridge for macOS MetaTrader 5"
 #property description "Attach this EA to one chart and keep Algo Trading enabled."
 
@@ -7,7 +7,7 @@
 #define FX2ACTIVE_ORDER_PROTOCOL 1
 #define FX2ACTIVE_MAGIC 26091501
 
-string BridgeVersion = "1.21";
+string BridgeVersion = "1.22";
 string BridgeFolder = "FX2Active";
 string SnapshotFile = "FX2Active\\snapshot.json";
 string SnapshotTempFile = "FX2Active\\snapshot.tmp";
@@ -243,9 +243,10 @@ void ProcessTradeCommand()
       return;
      }
    if(!(bool)TerminalInfoInteger(TERMINAL_TRADE_ALLOWED) ||
-      !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))
+      !(bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED) ||
+      !(bool)AccountInfoInteger(ACCOUNT_TRADE_EXPERT))
      {
-      BlockCommand(command_id,"MT5 Algo Trading/account trading permission is disabled.");
+      BlockCommand(command_id,"MT5 Algo Trading/account Expert Advisor trading permission is disabled.");
       return;
      }
 
@@ -273,6 +274,7 @@ void ProcessTradeCommand()
    double tp=StringToDouble(CommandValue(text,"tp"));
    int deviation=(int)StringToInteger(CommandValue(text,"deviation"));
    double max_spread_pips=StringToDouble(CommandValue(text,"max_spread_pips"));
+   int max_exposure=(int)StringToInteger(CommandValue(text,"max_exposure"));
 
    if((side!="BUY" && side!="SELL") || (mode!="MARKET" && mode!="PENDING"))
      {
@@ -284,6 +286,19 @@ void ProcessTradeCommand()
       BlockCommand(command_id,"Invalid FX2Active order prices or volume.");
       return;
      }
+   if(max_exposure<=0)
+     {
+      BlockCommand(command_id,"Invalid FX2Active maximum exposure setting.");
+      return;
+     }
+
+   int current_exposure=CountFX2ActivePositions()+CountFX2ActiveOrders();
+   if(current_exposure>=max_exposure)
+     {
+      BlockCommand(command_id,"FX2Active position/order limit reached.");
+      return;
+     }
+
    if(!SymbolSelect(symbol,true))
      {
       BlockCommand(command_id,"MT5 could not select the requested symbol.");
@@ -291,7 +306,7 @@ void ProcessTradeCommand()
      }
 
    MqlTick tick;
-   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0)
+   if(!SymbolInfoTick(symbol,tick) || tick.bid<=0.0 || tick.ask<=0.0 || tick.ask<tick.bid)
      {
       BlockCommand(command_id,"MT5 returned no valid Bid/Ask for the symbol.");
       return;
@@ -300,12 +315,29 @@ void ProcessTradeCommand()
    double point=0.0;
    long digits=0;
    long stops_level=0;
+   double volume_min=0.0;
+   double volume_max=0.0;
+   double volume_step=0.0;
    SymbolInfoDouble(symbol,SYMBOL_POINT,point);
    SymbolInfoInteger(symbol,SYMBOL_DIGITS,digits);
    SymbolInfoInteger(symbol,SYMBOL_TRADE_STOPS_LEVEL,stops_level);
-   if(point<=0.0)
+   SymbolInfoDouble(symbol,SYMBOL_VOLUME_MIN,volume_min);
+   SymbolInfoDouble(symbol,SYMBOL_VOLUME_MAX,volume_max);
+   SymbolInfoDouble(symbol,SYMBOL_VOLUME_STEP,volume_step);
+   if(point<=0.0 || volume_min<=0.0 || volume_max<volume_min || volume_step<=0.0)
      {
-      BlockCommand(command_id,"Broker returned an invalid point size.");
+      BlockCommand(command_id,"Broker returned invalid symbol trading limits.");
+      return;
+     }
+   if(volume<volume_min-1e-12 || volume>volume_max+1e-12)
+     {
+      BlockCommand(command_id,"FX2Active volume is outside the broker limits.");
+      return;
+     }
+   double volume_units=volume/volume_step;
+   if(MathAbs(volume_units-MathRound(volume_units))>1e-7)
+     {
+      BlockCommand(command_id,"FX2Active volume does not match the broker volume step.");
       return;
      }
 
@@ -488,7 +520,8 @@ void WriteSnapshot()
    json+="\"balance\":"+DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE),2)+",";
    json+="\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",";
    json+="\"trade_mode\":"+IntegerToString(AccountInfoInteger(ACCOUNT_TRADE_MODE))+",";
-   json+="\"trade_allowed\":"+JsonBool((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+"},";
+   json+="\"trade_allowed\":"+JsonBool((bool)AccountInfoInteger(ACCOUNT_TRADE_ALLOWED))+",";
+   json+="\"trade_expert\":"+JsonBool((bool)AccountInfoInteger(ACCOUNT_TRADE_EXPERT))+"},";
    json+="\"open_positions\":"+IntegerToString(PositionsTotal())+",";
    json+="\"fx2active_open_positions\":"+IntegerToString(CountFX2ActivePositions())+",";
    json+="\"fx2active_pending_orders\":"+IntegerToString(CountFX2ActiveOrders())+",";
@@ -538,7 +571,7 @@ int OnInit()
 
    WriteSnapshot();
    ProcessTradeCommand();
-   Print("FX2Active bridge started. Keep this EA attached to one chart.");
+   Print("FX2Active bridge v1.22 started. Keep this EA attached to one chart.");
    return INIT_SUCCEEDED;
   }
 
