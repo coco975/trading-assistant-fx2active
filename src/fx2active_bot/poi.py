@@ -47,7 +47,13 @@ class POIEvidence:
 
 
 class ConfigurablePOIRule:
-    """Deterministic POI heuristics controlled by the web panel."""
+    """Deterministic POI heuristics controlled by the web panel.
+
+    Candle confirmation is retained as quality evidence, but it is deliberately
+    not a hard setup-eligibility veto. Prior strategy testing showed that using
+    candle conviction as a mandatory gate removed otherwise valid trades. The
+    dedicated entry trigger remains responsible for any close-based confirmation.
+    """
 
     def __init__(
         self,
@@ -137,12 +143,15 @@ class ConfigurablePOIRule:
     def _confirms(self, evidence: POIEvidence) -> bool:
         self.last_evidence = evidence
         values = evidence.as_dict()
+
+        # Structural POIs decide setup eligibility. Candle confirmation is a
+        # secondary quality signal and must not veto a valid higher-timeframe
+        # setup; close-based confirmation is handled by entry_trigger instead.
         enabled = {
             "support_resistance": self.settings.support_resistance,
             "previous_swing": self.settings.previous_swing,
             "trendline": self.settings.trendline,
             "psychological_level": self.settings.psychological_level,
-            "candle_confirmation": self.settings.candle_confirmation,
         }
         active_names = [name for name, is_enabled in enabled.items() if is_enabled]
         required = min(self.settings.min_confirmations, len(active_names))
