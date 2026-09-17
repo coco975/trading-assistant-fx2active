@@ -45,7 +45,15 @@ class WebControlledFibStrategy:
         if not settings.fib_enabled:
             self._decision("controls", "Fibonacci Entry is OFF.")
             return None
-        if current_open_positions >= settings.max_open_positions:
+
+        # Pending orders must keep being re-analysed while they are waiting.
+        # The executor compares the currently valid setup with any FX2Active
+        # pending order and cancels/replaces it if structure or direction changes.
+        # Market-entry mode still respects the normal exposure gate here.
+        if (
+            settings.execution_mode != "pending_limit"
+            and current_open_positions >= settings.max_open_positions
+        ):
             self._decision(
                 "position_limit",
                 "Maximum Open Positions has been reached.",
