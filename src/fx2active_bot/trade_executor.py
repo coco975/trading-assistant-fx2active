@@ -55,18 +55,7 @@ class ExecutionStateStore:
             )
         return payload
 
-    def contains(self, fingerprint: str) -> bool:
-        return fingerprint in self._load()["processed"]
-
-    def record(self, fingerprint: str, result: ExecutionResult) -> None:
-        payload = self._load()
-        processed = payload["processed"]
-        processed[fingerprint] = result.to_dict()
-
-        if len(processed) > 500:
-            for key in list(processed)[: len(processed) - 500]:
-                processed.pop(key, None)
-
+    def _save(self, payload: dict[str, Any]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
             prefix=f".{self.path.name}.", dir=str(self.path.parent), text=True
@@ -81,6 +70,38 @@ class ExecutionStateStore:
         finally:
             if os.path.exists(tmp_name):
                 os.unlink(tmp_name)
+
+    def contains(self, fingerprint: str) -> bool:
+        return fingerprint in self._load()["processed"]
+
+    def record(self, fingerprint: str, result: ExecutionResult) -> None:
+        payload = self._load()
+        processed = payload["processed"]
+        processed[fingerprint] = result.to_dict()
+
+        if len(processed) > 500:
+            for key in list(processed)[: len(processed) - 500]:
+                processed.pop(key, None)
+
+        self._save(payload)
+
+    def release_order_ticket(self, ticket: int) -> None:
+        """Release duplicate state only after a broker-confirmed pending cancellation."""
+
+        if ticket <= 0 or not self.path.exists():
+            return
+        payload = self._load()
+        processed = payload["processed"]
+        matching = [
+            fingerprint
+            for fingerprint, result in processed.items()
+            if isinstance(result, dict) and int(result.get("order_ticket", 0) or 0) == ticket
+        ]
+        if not matching:
+            return
+        for fingerprint in matching:
+            processed.pop(fingerprint, None)
+        self._save(payload)
 
 
 def setup_fingerprint(symbol: str, setup: Any, execution_mode: str) -> str:
@@ -197,9 +218,142 @@ def _terminal_ready(mt5: Any) -> tuple[bool, str]:
     return True, "MT5 terminal trading access is ready."
 
 
+def _pending_matches_setup(mt5: Any, order: Any, setup: Any, volume: float, symbol_info: Any) -> bool:
+    side = str(getattr(setup, "side", "")).upper()
+    if side == "BUY":
+        expected_type = int(getattr(mt5, "ORDER_TYPE_BUY_LIMIT", 2))
+    elif side == "SELL":
+        expected_type = int(getattr(mt5, "ORDER_TYPE_SELL_LIMIT", 3))
+    else:
+        return False
+
+    if int(getattr(order, "type", -1)) != expected_type:
+        return False
+
+    digits = int(getattr(symbol_info, "digits", 0) or 0)
+    point = float(getattr(symbol_info, "point", 0.0) or 0.0)
+    price_tolerance = max(point / 2.0, 10 ** (-max(digits, 0)) / 2.0) if digits >= 0 else point / 2.0
+
+    expected_entry = _normalize_price(float(setup.entry), digits)
+    expected_sl = _normalize_price(float(setup.stop_loss), digits)
+    expected_tp = _normalize_price(float(setup.take_profit), digits)
+    actual_entry = float(getattr(order, "price_open", 0.0) or 0.0)
+    actual_sl = float(getattr(order, "sl", 0.0) or 0.0)
+    actual_tp = float(getattr(order, "tp", 0.0) or 0.0)
+
+    if abs(actual_entry - expected_entry) > price_tolerance:
+        return False
+    if abs(actual_sl - expected_sl) > price_tolerance:
+        return False
+    if abs(actual_tp - expected_tp) > price_tolerance:
+        return False
+
+    actual_volume = float(getattr(order, "volume_current", getattr(order, "volume_initial", 0.0)) or 0.0)
+    volume_step = float(getattr(symbol_info, "volume_step", 0.0) or 0.0)
+    volume_tolerance = max(volume_step / 2.0, 1e-8)
+    return abs(actual_volume - float(volume)) <= volume_tolerance
+
+
 class WindowsTradeExecutor:
     def __init__(self, *, state_path: str | Path) -> None:
         self.state = ExecutionStateStore(state_path)
+
+    def _reconcile_pending_setup(
+        self,
+        *,
+        mt5: Any,
+        symbol: str,
+        setup: Any,
+        volume: float,
+        symbol_info: Any,
+        fingerprint: str,
+    ) -> ExecutionResult | None:
+        """Keep only the pending order matching the currently valid Fib setup.
+
+        A direction change, new swing/Fib geometry, or sizing change makes the
+        existing FX2Active pending order stale. Stale bot-owned orders are removed
+        before a replacement is submitted. Manual/non-FX2Active orders are never touched.
+        """
+
+        orders = mt5.orders_get(symbol=symbol)
+        if orders is None:
+            return ExecutionResult(
+                False,
+                "error",
+                f"Could not read MT5 pending orders: {mt5.last_error()}",
+                fingerprint,
+            )
+
+        bot_orders = [order for order in orders if _magic_matches(order)]
+        if not bot_orders:
+            return None
+
+        matching_order: Any | None = None
+        stale_orders: list[Any] = []
+        for order in bot_orders:
+            if matching_order is None and _pending_matches_setup(mt5, order, setup, volume, symbol_info):
+                matching_order = order
+            else:
+                stale_orders.append(order)
+
+        for order in stale_orders:
+            ticket = int(getattr(order, "ticket", 0) or 0)
+            if ticket <= 0:
+                return ExecutionResult(
+                    False,
+                    "blocked",
+                    "FX2Active found a stale pending order without a valid ticket; replacement blocked.",
+                    fingerprint,
+                )
+            request = {
+                "action": int(getattr(mt5, "TRADE_ACTION_REMOVE", 8)),
+                "order": ticket,
+                "symbol": symbol,
+                "magic": FX2ACTIVE_MAGIC,
+                "comment": FX2ACTIVE_COMMENT,
+            }
+            result = mt5.order_send(request)
+            if result is None:
+                return ExecutionResult(
+                    False,
+                    "ambiguous",
+                    f"MT5 returned no result while cancelling stale pending order {ticket}: "
+                    f"{mt5.last_error()}. Replacement blocked.",
+                    fingerprint,
+                    order_ticket=ticket,
+                )
+            retcode = int(getattr(result, "retcode", -1))
+            if retcode not in _successful_send_retcodes(mt5):
+                return ExecutionResult(
+                    False,
+                    "blocked",
+                    f"MT5 could not cancel stale pending order {ticket}: {_result_message(result)}",
+                    fingerprint,
+                    retcode=retcode,
+                    order_ticket=ticket,
+                )
+            self.state.release_order_ticket(ticket)
+
+        if matching_order is not None:
+            ticket = int(getattr(matching_order, "ticket", 0) or 0) or None
+            return ExecutionResult(
+                True,
+                "pending_active",
+                "Current FX2Active pending order still matches the latest M15 Fib setup.",
+                fingerprint,
+                order_ticket=ticket,
+                volume=float(
+                    getattr(
+                        matching_order,
+                        "volume_current",
+                        getattr(matching_order, "volume_initial", volume),
+                    )
+                    or volume
+                ),
+                price=float(getattr(matching_order, "price_open", setup.entry) or setup.entry),
+            )
+
+        return None
 
     def execute(
         self,
@@ -220,13 +374,6 @@ class WindowsTradeExecutor:
                 False,
                 "disabled",
                 "Order execution is OFF in the dashboard.",
-                fingerprint,
-            )
-        if self.state.contains(fingerprint):
-            return ExecutionResult(
-                False,
-                "duplicate",
-                "This FX2Active setup was already submitted; duplicate order blocked.",
                 fingerprint,
             )
 
@@ -256,6 +403,27 @@ class WindowsTradeExecutor:
                 False,
                 "blocked",
                 "MT5 account does not allow Expert Advisor/Python automated trading.",
+                fingerprint,
+            )
+
+        pending = settings.execution_mode == "pending_limit"
+        if pending:
+            reconciled = self._reconcile_pending_setup(
+                mt5=mt5,
+                symbol=symbol,
+                setup=setup,
+                volume=volume,
+                symbol_info=symbol_info,
+                fingerprint=fingerprint,
+            )
+            if reconciled is not None:
+                return reconciled
+
+        if self.state.contains(fingerprint):
+            return ExecutionResult(
+                False,
+                "duplicate",
+                "This FX2Active setup was already submitted; duplicate order blocked.",
                 fingerprint,
             )
 
@@ -290,7 +458,6 @@ class WindowsTradeExecutor:
         if side not in {"BUY", "SELL"}:
             return ExecutionResult(False, "error", f"Unsupported side: {side}", fingerprint)
 
-        pending = settings.execution_mode == "pending_limit"
         digits = int(getattr(symbol_info, "digits", 0) or 0)
         point = float(getattr(symbol_info, "point", 0.0) or 0.0)
         if point <= 0:
