@@ -20,28 +20,50 @@ def _candle(index: int, *, low: float, high: float) -> Candle:
 
 def test_candle_quality_is_not_a_hard_poi_veto() -> None:
     settings = PoiSettings(
-        support_resistance=False,
-        previous_swing=False,
+        support_resistance=True,
+        previous_swing=True,
         trendline=False,
         psychological_level=False,
         candle_confirmation=True,
-        min_confirmations=1,
+        min_confirmations=2,
     )
     rule = ConfigurablePOIRule(settings, pip_size=0.01)
     evidence = POIEvidence(
-        support_resistance=False,
-        previous_swing=False,
+        support_resistance=True,
+        previous_swing=True,
         trendline=False,
         psychological_level=False,
         candle_confirmation=False,
     )
 
-    # Candle conviction remains quality evidence, but does not make an otherwise
-    # valid higher-timeframe setup ineligible.
+    # Both structural confirmations satisfy the configured requirement. A weak
+    # candle cannot raise that requirement to three and veto the setup.
     assert rule._confirms(evidence) is True
 
 
-def test_structural_poi_requirement_still_applies() -> None:
+def test_candle_quality_can_help_without_becoming_mandatory() -> None:
+    settings = PoiSettings(
+        support_resistance=True,
+        previous_swing=True,
+        trendline=False,
+        psychological_level=False,
+        candle_confirmation=True,
+        min_confirmations=2,
+    )
+    rule = ConfigurablePOIRule(settings, pip_size=0.01)
+    evidence = POIEvidence(
+        support_resistance=True,
+        previous_swing=False,
+        trendline=False,
+        psychological_level=False,
+        candle_confirmation=True,
+    )
+
+    # Candle quality may positively contribute to the score.
+    assert rule._confirms(evidence) is True
+
+
+def test_structural_poi_requirement_still_applies_without_candle_bonus() -> None:
     settings = PoiSettings(
         support_resistance=True,
         previous_swing=False,
@@ -56,7 +78,7 @@ def test_structural_poi_requirement_still_applies() -> None:
         previous_swing=False,
         trendline=False,
         psychological_level=False,
-        candle_confirmation=True,
+        candle_confirmation=False,
     )
 
     assert rule._confirms(evidence) is False
