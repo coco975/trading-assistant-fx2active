@@ -115,7 +115,7 @@ class ShortFibStrategy:
 
 
 class DualFibStrategy:
-    """Evaluate the most recent completed M15 impulse in either direction."""
+    """Evaluate the most recent completed M15 impulses in either direction."""
 
     def __init__(self, config: StrategyConfig, poi_rule: PointOfInterestRule) -> None:
         self.config = config
@@ -148,7 +148,14 @@ class DualFibStrategy:
         if not candidates:
             return None
 
-        _, side, pair = max(candidates, key=lambda item: item[0])
-        if side == "BUY":
-            return _build_long(candles, pair, self.config, self.poi_rule)
-        return _build_short(candles, pair, self.config, self.poi_rule)
+        # The newest directional structure gets first priority, but a POI
+        # rejection on that side must not suppress a valid candidate on the
+        # opposite side. Evaluate both candidates in recency order.
+        for _, side, pair in sorted(candidates, key=lambda item: item[0], reverse=True):
+            if side == "BUY":
+                setup = _build_long(candles, pair, self.config, self.poi_rule)
+            else:
+                setup = _build_short(candles, pair, self.config, self.poi_rule)
+            if setup is not None:
+                return setup
+        return None
