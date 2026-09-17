@@ -47,7 +47,13 @@ class POIEvidence:
 
 
 class ConfigurablePOIRule:
-    """Deterministic POI heuristics controlled by the web panel."""
+    """Deterministic POI heuristics controlled by the web panel.
+
+    Candle confirmation is retained as positive quality evidence, but it never
+    increases the number of confirmations required for eligibility. This keeps
+    candle conviction from vetoing an otherwise valid structural setup while
+    still allowing a strong candle to contribute positively when enabled.
+    """
 
     def __init__(
         self,
@@ -137,18 +143,26 @@ class ConfigurablePOIRule:
     def _confirms(self, evidence: POIEvidence) -> bool:
         self.last_evidence = evidence
         values = evidence.as_dict()
-        enabled = {
+
+        structural_enabled = {
             "support_resistance": self.settings.support_resistance,
             "previous_swing": self.settings.previous_swing,
             "trendline": self.settings.trendline,
             "psychological_level": self.settings.psychological_level,
-            "candle_confirmation": self.settings.candle_confirmation,
         }
-        active_names = [name for name, is_enabled in enabled.items() if is_enabled]
-        required = min(self.settings.min_confirmations, len(active_names))
+        active_structural = [
+            name for name, is_enabled in structural_enabled.items() if is_enabled
+        ]
+
+        # Candle quality may add to the score, but never raises the required
+        # score. Therefore a weak candle cannot veto structural eligibility.
+        required = min(self.settings.min_confirmations, len(active_structural))
         if required == 0:
             return True
-        score = sum(1 for name in active_names if values[name])
+
+        score = sum(1 for name in active_structural if values[name])
+        if self.settings.candle_confirmation and values["candle_confirmation"]:
+            score += 1
         return score >= required
 
     def confirms_long(self, candles: Sequence[Candle], levels: BullishFibLevels) -> bool:
